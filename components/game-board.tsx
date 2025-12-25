@@ -89,6 +89,22 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
   const [handCorrect, setHandCorrect] = useState(0)
   const handCorrectRef = useRef(0)
 
+  // Store initial stats from database
+  const initialStatsRef = useRef<{
+    bankroll: number
+    hands_played: number
+    hands_won: number
+    hands_lost: number
+    hands_pushed: number
+    total_moves: number
+    strategy_decisions: number
+    strategy_correct: number
+    strategy_streak: number
+  } | null>(null)
+
+  // Debounce timer for auto-save
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
   const resetHandCounters = () => {
     setHandDecisions(0)
     handDecisionsRef.current = 0
@@ -96,23 +112,158 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
     handCorrectRef.current = 0
   }
 
-  // Placeholder for saveGameStats function
-  const saveGameStats = () => {
-    // Implement game saving logic here
-    console.log("Saving game stats...")
+  // Save game stats to database (only in real mode)
+  const saveGameStats = async () => {
+    if (mode !== "real") return
+
+    const { updateGameStats } = await import("@/lib/actions/game-stats")
+
+    // Calculate cumulative stats (initial + session)
+    const initial = initialStatsRef.current || {
+      bankroll: initialBankroll,
+      hands_played: 0,
+      hands_won: 0,
+      hands_lost: 0,
+      hands_pushed: 0,
+      total_moves: 0,
+      strategy_decisions: 0,
+      strategy_correct: 0,
+      strategy_streak: 0,
+    }
+
+    const cumulativeStats = {
+      bankroll: gameState.bankroll,
+      hands_played: initial.hands_played + sessionStats.handsPlayed,
+      hands_won: initial.hands_won + sessionStats.handsWon,
+      hands_lost: initial.hands_lost + sessionStats.handsLost,
+      hands_pushed: initial.hands_pushed + sessionStats.handsPushed,
+      total_moves: initial.total_moves + sessionStats.totalMoves,
+      strategy_decisions: initial.strategy_decisions + sessionStats.strategyDecisions,
+      strategy_correct: initial.strategy_correct + sessionStats.strategyCorrect,
+      strategy_streak: sessionStats.strategyStreak > initial.strategy_streak 
+        ? sessionStats.strategyStreak 
+        : initial.strategy_streak,
+    }
+
+    try {
+      await updateGameStats(cumulativeStats)
+    } catch (error) {
+      console.error("Failed to save game stats:", error)
+    }
   }
+
+  // Debounced auto-save function
+  const autoSave = () => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+    saveTimeoutRef.current = setTimeout(() => {
+      saveGameStats()
+    }, 2000) // Save 2 seconds after last change
+  }
+
+  // Load initial stats from database on mount (only in real mode)
+  useEffect(() => {
+    if (mode === "real") {
+      const loadInitialStats = async () => {
+        const { getGameStats } = await import("@/lib/actions/game-stats")
+        const result = await getGameStats()
+        
+        if (result.stats) {
+          initialStatsRef.current = {
+            bankroll: result.stats.bankroll || initialBankroll,
+            hands_played: result.stats.hands_played || 0,
+            hands_won: result.stats.hands_won || 0,
+            hands_lost: result.stats.hands_lost || 0,
+            hands_pushed: result.stats.hands_pushed || 0,
+            total_moves: result.stats.total_moves || 0,
+            strategy_decisions: result.stats.strategy_decisions || 0,
+            strategy_correct: result.stats.strategy_correct || 0,
+            strategy_streak: result.stats.strategy_streak || 0,
+          }
+          // Update bankroll to match database
+          setGameState((prev) => ({
+            ...prev,
+            bankroll: initialStatsRef.current!.bankroll,
+          }))
+        } else {
+          // No stats yet, use defaults
+          initialStatsRef.current = {
+            bankroll: initialBankroll,
+            hands_played: 0,
+            hands_won: 0,
+            hands_lost: 0,
+            hands_pushed: 0,
+            total_moves: 0,
+            strategy_decisions: 0,
+            strategy_correct: 0,
+            strategy_streak: 0,
+          }
+        }
+      }
+      loadInitialStats()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
 
   useEffect(() => {
     initializeGame()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Auto-save on bankroll changes (debounced)
+  useEffect(() => {
+    if (mode === "real") {
+      autoSave()
+    }
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState.bankroll, mode])
+
+  // Auto-save on session stats changes (debounced)
+  useEffect(() => {
+    if (mode === "real") {
+      autoSave()
+    }
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    sessionStats.handsPlayed,
+    sessionStats.handsWon,
+    sessionStats.handsLost,
+    sessionStats.handsPushed,
+    sessionStats.totalMoves,
+    sessionStats.strategyDecisions,
+    sessionStats.strategyCorrect,
+    sessionStats.strategyStreak,
+    mode,
+  ])
+
+  // Save immediately when game phase finishes
   useEffect(() => {
     if (mode === "real" && gameState.gamePhase === "finished") {
       saveGameStats()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameState.gamePhase, gameState.bankroll])
+  }, [gameState.gamePhase, mode])
+
+  // Save on component unmount (when user exits)
+  useEffect(() => {
+    return () => {
+      if (mode === "real") {
+        saveGameStats()
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
 
   const getAvailableMoney = () => {
     if (mode === "practice" || mode === "testing") return 999999

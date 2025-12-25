@@ -1,12 +1,34 @@
 "use server"
 
-// Authentication removed - stats tracking disabled for now
-export async function getGameStats(userId?: string) {
-  // No authentication required - return default stats
-  return { stats: null }
+import { createClient } from "@/lib/supabase/server"
+
+export async function getGameStats() {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
+
+  if (authError || !user) {
+    // User not authenticated, return default stats
+    return { stats: null }
+  }
+
+  const { data: stats, error } = await supabase
+    .from("game_stats")
+    .select("*")
+    .eq("user_id", user.id)
+    .single()
+
+  if (error && error.code !== "PGRST116") {
+    // PGRST116 is "no rows returned" which is fine for first-time users
+    return { error: error.message }
+  }
+
+  return { stats: stats || null }
 }
 
-// Authentication removed - stats tracking disabled for now
 export async function updateGameStats(stats: {
   bankroll: number
   hands_played: number
@@ -18,16 +40,65 @@ export async function updateGameStats(stats: {
   strategy_correct: number
   strategy_streak: number
 }) {
-  // No authentication required - stats updates disabled
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
+
+  if (authError || !user) {
+    // User not authenticated, skip saving
+    return { success: false, error: "Not authenticated" }
+  }
+
+  // Try to update first, if no row exists, insert
+  const { error: updateError } = await supabase
+    .from("game_stats")
+    .upsert(
+      {
+        user_id: user.id,
+        ...stats,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "user_id",
+      }
+    )
+
+  if (updateError) {
+    return { success: false, error: updateError.message }
+  }
+
   return { success: true }
 }
 
-// Authentication removed - no user profile required
 export async function getUserProfile() {
-  return { error: "No authentication" }
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
+
+  if (authError || !user) {
+    return { error: "Not authenticated" }
+  }
+
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .single()
+
+  if (error) {
+    return { error: error.message }
+  }
+
+  return { profile }
 }
 
-// Authentication removed - sign out no longer needed
 export async function signOut() {
-  // No-op since there's no authentication
+  const supabase = await createClient()
+  await supabase.auth.signOut()
 }

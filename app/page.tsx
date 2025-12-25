@@ -14,11 +14,29 @@ type View = "home" | "game" | "strategy" | "settings"
 export default function BlackjackApp() {
   const [currentView, setCurrentView] = useState<View>("home")
   const [gameMode, setGameMode] = useState<GameMode>(null)
-  const [initialBankroll] = useState(1000)
+  const [initialBankroll, setInitialBankroll] = useState(1000)
 
-  const handleGameModeClick = (mode: GameMode) => {
+  // Load stats when starting a game in real mode
+  const handleGameModeClick = async (mode: GameMode) => {
     setGameMode(mode)
     setCurrentView("game")
+    
+    // Load bankroll from database for real mode
+    if (mode === "real") {
+      try {
+        const { getGameStats } = await import("@/lib/actions/game-stats")
+        const result = await getGameStats()
+        if (result.stats?.bankroll) {
+          setInitialBankroll(result.stats.bankroll)
+        }
+      } catch (error) {
+        console.error("Failed to load game stats:", error)
+        // Keep default bankroll if load fails
+      }
+    } else {
+      // Reset to default for practice/testing modes
+      setInitialBankroll(1000)
+    }
   }
 
   const goHome = () => {
