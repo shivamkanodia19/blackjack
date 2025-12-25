@@ -39,6 +39,9 @@ export default function SignUpPage() {
     }
 
     try {
+      // Email confirmation disabled - user is signed in immediately
+      // Note: Email confirmation must be disabled in Supabase dashboard:
+      // Authentication > Providers > Email > "Confirm email" should be OFF
       const { error } = await supabase.auth.signUp({
         email,
         password,
@@ -46,11 +49,13 @@ export default function SignUpPage() {
           data: {
             name,
           },
-          emailRedirectTo: undefined,
+          // No emailRedirectTo means no confirmation email is sent
+          // Users are signed in immediately when email confirmation is disabled in dashboard
         },
       })
       if (error) throw error
 
+      // User is automatically signed in if email confirmation is disabled
       router.push("/")
       router.refresh()
     } catch (error: unknown) {
