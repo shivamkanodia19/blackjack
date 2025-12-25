@@ -1,15 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Heart, GraduationCap, Beaker, BookOpen, FileText, Spade, LogOut, User, LogIn, UserPlus } from "lucide-react"
+import { Heart, GraduationCap, Beaker, BookOpen, FileText, Spade } from "lucide-react"
 import GameBoard from "@/components/game-board"
 import StrategyGuide from "@/components/strategy-guide"
 import GameSettings from "@/components/game-settings"
-import { getUserProfile, signOut } from "@/lib/actions/game-stats"
-import { useRouter } from "next/navigation"
-import Link from "next/link"
 
 type GameMode = "practice" | "real" | "testing" | null
 type View = "home" | "game" | "strategy" | "settings"
@@ -17,35 +14,9 @@ type View = "home" | "game" | "strategy" | "settings"
 export default function BlackjackApp() {
   const [currentView, setCurrentView] = useState<View>("home")
   const [gameMode, setGameMode] = useState<GameMode>(null)
-  const [userProfile, setUserProfile] = useState<{ name: string; email: string } | null>(null)
-  const [initialBankroll, setInitialBankroll] = useState(1000)
-  const [isLoading, setIsLoading] = useState(true)
-  const router = useRouter()
-
-  useEffect(() => {
-    loadUserData()
-  }, [])
-
-  const loadUserData = async () => {
-    const result = await getUserProfile()
-    if (!result.error && result.profile) {
-      setUserProfile({ name: result.profile.name, email: result.profile.email })
-      const { getGameStats } = await import("@/lib/actions/game-stats")
-      const statsResult = await getGameStats()
-      if (statsResult.stats) {
-        setInitialBankroll(statsResult.stats.bankroll)
-      }
-    }
-    setIsLoading(false)
-  }
+  const [initialBankroll] = useState(1000)
 
   const handleGameModeClick = (mode: GameMode) => {
-    if (!userProfile) {
-      // User is not logged in, redirect to login
-      router.push("/auth/login")
-      return
-    }
-    // User is logged in, start the game
     setGameMode(mode)
     setCurrentView("game")
   }
@@ -53,19 +24,6 @@ export default function BlackjackApp() {
   const goHome = () => {
     setCurrentView("home")
     setGameMode(null)
-    loadUserData()
-  }
-
-  const handleSignOut = async () => {
-    await signOut()
-  }
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-700 via-teal-700 to-emerald-800 flex items-center justify-center">
-        <div className="text-white text-xl">Loading...</div>
-      </div>
-    )
   }
 
   if (currentView === "game" && gameMode) {
@@ -84,52 +42,13 @@ export default function BlackjackApp() {
     <div className="min-h-screen bg-gradient-to-br from-emerald-700 via-teal-700 to-emerald-800">
       <div className="container mx-auto px-4 py-16">
         {/* Top Navigation Bar */}
-        <div className="flex justify-between items-center mb-8">
+        <div className="flex justify-center items-center mb-8">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-white/10 backdrop-blur-sm rounded-xl flex items-center justify-center">
               <Spade className="h-7 w-7 text-white" fill="white" />
             </div>
             <h1 className="text-2xl font-bold text-white">Blackjack</h1>
           </div>
-          
-          {userProfile ? (
-            <div className="bg-white/10 backdrop-blur-sm rounded-xl px-6 py-3 flex items-center gap-4">
-              <div className="flex items-center gap-2 text-white">
-                <User className="h-5 w-5" />
-                <div>
-                  <div className="font-semibold">{userProfile.name}</div>
-                  <div className="text-xs opacity-80">{userProfile.email}</div>
-                </div>
-              </div>
-              <Button
-                onClick={handleSignOut}
-                variant="outline"
-                size="sm"
-                className="bg-white/10 border-white/20 text-white hover:bg-white/20"
-              >
-                <LogOut className="h-4 w-4 mr-1" />
-                Sign Out
-              </Button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-3">
-              <Link href="/auth/login">
-                <Button
-                  variant="outline"
-                  className="bg-white/10 backdrop-blur-sm border-white/20 text-white hover:bg-white/20"
-                >
-                  <LogIn className="h-4 w-4 mr-2" />
-                  Login
-                </Button>
-              </Link>
-              <Link href="/auth/sign-up">
-                <Button className="bg-white text-emerald-700 hover:bg-white/90 font-semibold">
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  Sign Up
-                </Button>
-              </Link>
-            </div>
-          )}
         </div>
 
         {/* Hero Section */}
@@ -179,16 +98,12 @@ export default function BlackjackApp() {
                 onClick={() => handleGameModeClick("real")}
                 className="w-full bg-red-500 hover:bg-red-600 text-white font-semibold py-6 rounded-xl shadow-lg text-lg"
               >
-                {userProfile ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <span className="w-6 h-6 rounded-full border-2 border-white flex items-center justify-center">
-                      <span className="w-2 h-2 bg-white rounded-full"></span>
-                    </span>
-                    Start Game
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-6 h-6 rounded-full border-2 border-white flex items-center justify-center">
+                    <span className="w-2 h-2 bg-white rounded-full"></span>
                   </span>
-                ) : (
-                  "Login to Play"
-                )}
+                  Start Game
+                </span>
               </Button>
             </CardContent>
           </Card>
@@ -224,16 +139,12 @@ export default function BlackjackApp() {
                 onClick={() => handleGameModeClick("practice")}
                 className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-6 rounded-xl shadow-lg text-lg"
               >
-                {userProfile ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <span className="w-6 h-6 rounded-full border-2 border-white flex items-center justify-center">
-                      <span className="w-2 h-2 bg-white rounded-full"></span>
-                    </span>
-                    Start Game
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-6 h-6 rounded-full border-2 border-white flex items-center justify-center">
+                    <span className="w-2 h-2 bg-white rounded-full"></span>
                   </span>
-                ) : (
-                  "Login to Play"
-                )}
+                  Start Game
+                </span>
               </Button>
             </CardContent>
           </Card>
@@ -269,16 +180,12 @@ export default function BlackjackApp() {
                 onClick={() => handleGameModeClick("testing")}
                 className="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-6 rounded-xl shadow-lg text-lg"
               >
-                {userProfile ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <span className="w-6 h-6 rounded-full border-2 border-white flex items-center justify-center">
-                      <span className="w-2 h-2 bg-white rounded-full"></span>
-                    </span>
-                    Start Game
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-6 h-6 rounded-full border-2 border-white flex items-center justify-center">
+                    <span className="w-2 h-2 bg-white rounded-full"></span>
                   </span>
-                ) : (
-                  "Login to Play"
-                )}
+                  Start Game
+                </span>
               </Button>
             </CardContent>
           </Card>
