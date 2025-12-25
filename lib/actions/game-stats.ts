@@ -3,27 +3,19 @@
 import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
 
-// TODO: When Clerk is integrated, replace userId parameter with Clerk user ID
 export async function getGameStats(userId?: string) {
   const supabase = await createClient()
 
-  // Auth check disabled - will use Clerk later
-  // const {
-  //   data: { user },
-  //   error: authError,
-  // } = await supabase.auth.getUser()
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
 
-  // if (authError || !user) {
-  //   return { error: "Not authenticated" }
-  // }
-
-  // For now, if no userId provided, return error
-  // When Clerk is integrated, get userId from Clerk session
-  if (!userId) {
-    return { error: "User ID required. Will be provided by Clerk when integrated." }
+  if (authError || !user) {
+    return { error: "Not authenticated" }
   }
 
-  const { data: stats, error } = await supabase.from("game_stats").select("*").eq("user_id", userId).single()
+  const { data: stats, error } = await supabase.from("game_stats").select("*").eq("user_id", user.id).single()
 
   if (error) {
     return { error: error.message }
@@ -32,37 +24,26 @@ export async function getGameStats(userId?: string) {
   return { stats }
 }
 
-// TODO: When Clerk is integrated, replace userId parameter with Clerk user ID
-export async function updateGameStats(
-  stats: {
-    bankroll: number
-    hands_played: number
-    hands_won: number
-    hands_lost: number
-    hands_pushed: number
-    total_moves: number
-    strategy_decisions: number
-    strategy_correct: number
-    strategy_streak: number
-  },
-  userId?: string
-) {
+export async function updateGameStats(stats: {
+  bankroll: number
+  hands_played: number
+  hands_won: number
+  hands_lost: number
+  hands_pushed: number
+  total_moves: number
+  strategy_decisions: number
+  strategy_correct: number
+  strategy_streak: number
+}) {
   const supabase = await createClient()
 
-  // Auth check disabled - will use Clerk later
-  // const {
-  //   data: { user },
-  //   error: authError,
-  // } = await supabase.auth.getUser()
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
 
-  // if (authError || !user) {
-  //   return { error: "Not authenticated" }
-  // }
-
-  // For now, if no userId provided, return error
-  // When Clerk is integrated, get userId from Clerk session
-  if (!userId) {
-    return { error: "User ID required. Will be provided by Clerk when integrated." }
+  if (authError || !user) {
+    return { error: "Not authenticated" }
   }
 
   const { error } = await supabase
@@ -71,7 +52,7 @@ export async function updateGameStats(
       ...stats,
       updated_at: new Date().toISOString(),
     })
-    .eq("user_id", userId)
+    .eq("user_id", user.id)
 
   if (error) {
     return { error: error.message }
@@ -80,27 +61,19 @@ export async function updateGameStats(
   return { success: true }
 }
 
-// TODO: When Clerk is integrated, replace userId parameter with Clerk user ID
-export async function getUserProfile(userId?: string) {
+export async function getUserProfile() {
   const supabase = await createClient()
 
-  // Auth check disabled - will use Clerk later
-  // const {
-  //   data: { user },
-  //   error: authError,
-  // } = await supabase.auth.getUser()
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
 
-  // if (authError || !user) {
-  //   return { error: "Not authenticated" }
-  // }
-
-  // For now, if no userId provided, return error
-  // When Clerk is integrated, get userId from Clerk session
-  if (!userId) {
-    return { error: "User ID required. Will be provided by Clerk when integrated." }
+  if (authError || !user) {
+    return { error: "Not authenticated" }
   }
 
-  const { data: profile, error } = await supabase.from("profiles").select("*").eq("id", userId).single()
+  const { data: profile, error } = await supabase.from("profiles").select("*").eq("id", user.id).single()
 
   if (error) {
     return { error: error.message }
@@ -109,10 +82,8 @@ export async function getUserProfile(userId?: string) {
   return { profile }
 }
 
-// TODO: When Clerk is integrated, use Clerk's signOut instead
 export async function signOut() {
-  // Auth disabled - will use Clerk later
-  // const supabase = await createClient()
-  // await supabase.auth.signOut()
+  const supabase = await createClient()
+  await supabase.auth.signOut()
   redirect("/auth/login")
 }
