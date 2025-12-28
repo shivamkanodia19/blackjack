@@ -114,7 +114,14 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
 
   // Save game stats to database (only in real mode)
   const saveGameStats = async () => {
-    if (mode !== "real") return
+    if (mode !== "real") {
+      console.log("[Stats] Skipping save - not in real mode")
+      return
+    }
+
+    console.log("[Stats] Attempting to save game stats...")
+    console.log("[Stats] Bankroll:", gameState.bankroll)
+    console.log("[Stats] Session stats:", sessionStats)
 
     const { updateGameStats } = await import("@/lib/actions/game-stats")
 
@@ -145,10 +152,17 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
         : initial.strategy_streak,
     }
 
+    console.log("[Stats] Cumulative stats to save:", cumulativeStats)
+
     try {
-      await updateGameStats(cumulativeStats)
+      const result = await updateGameStats(cumulativeStats)
+      if (result.success) {
+        console.log("[Stats] ✅ Successfully saved game stats!")
+      } else {
+        console.error("[Stats] ❌ Failed to save game stats:", result.error)
+      }
     } catch (error) {
-      console.error("Failed to save game stats:", error)
+      console.error("[Stats] ❌ Error saving game stats:", error)
     }
   }
 

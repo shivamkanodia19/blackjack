@@ -3,30 +3,40 @@
 import { createClient } from "@/lib/supabase/server"
 
 export async function getGameStats() {
-  const supabase = await createClient()
+  try {
+    const supabase = await createClient()
 
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
 
-  if (authError || !user) {
-    // User not authenticated, return default stats
-    return { stats: null }
+    if (authError || !user) {
+      console.log("[Server] getGameStats - User not authenticated")
+      // User not authenticated, return default stats
+      return { stats: null }
+    }
+
+    console.log("[Server] getGameStats - User authenticated, ID:", user.id)
+
+    const { data: stats, error } = await supabase
+      .from("game_stats")
+      .select("*")
+      .eq("user_id", user.id)
+      .single()
+
+    if (error && error.code !== "PGRST116") {
+      // PGRST116 is "no rows returned" which is fine for first-time users
+      console.error("[Server] Error loading stats:", error)
+      return { error: error.message }
+    }
+
+    console.log("[Server] Loaded stats:", stats)
+    return { stats: stats || null }
+  } catch (error) {
+    console.error("[Server] Exception in getGameStats:", error)
+    return { stats: null, error: error instanceof Error ? error.message : "Unknown error" }
   }
-
-  const { data: stats, error } = await supabase
-    .from("game_stats")
-    .select("*")
-    .eq("user_id", user.id)
-    .single()
-
-  if (error && error.code !== "PGRST116") {
-    // PGRST116 is "no rows returned" which is fine for first-time users
-    return { error: error.message }
-  }
-
-  return { stats: stats || null }
 }
 
 export async function updateGameStats(stats: {
@@ -40,37 +50,49 @@ export async function updateGameStats(stats: {
   strategy_correct: number
   strategy_streak: number
 }) {
-  const supabase = await createClient()
+  try {
+    const supabase = await createClient()
 
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
 
-  if (authError || !user) {
-    // User not authenticated, skip saving
-    return { success: false, error: "Not authenticated" }
+    if (authError || !user) {
+      console.log("[Server] User not authenticated - authError:", authError, "user:", user)
+      // User not authenticated, skip saving
+      return { success: false, error: "Not authenticated" }
+    }
+
+    console.log("[Server] User authenticated, ID:", user.id)
+    console.log("[Server] Saving stats:", stats)
+
+    // Try to update first, if no row exists, insert
+    const { data, error: updateError } = await supabase
+      .from("game_stats")
+      .upsert(
+        {
+          user_id: user.id,
+          ...stats,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "user_id",
+        }
+      )
+      .select()
+
+    if (updateError) {
+      console.error("[Server] Database error:", updateError)
+      return { success: false, error: updateError.message }
+    }
+
+    console.log("[Server] ✅ Stats saved successfully:", data)
+    return { success: true, data }
+  } catch (error) {
+    console.error("[Server] Exception in updateGameStats:", error)
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
   }
-
-  // Try to update first, if no row exists, insert
-  const { error: updateError } = await supabase
-    .from("game_stats")
-    .upsert(
-      {
-        user_id: user.id,
-        ...stats,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        onConflict: "user_id",
-      }
-    )
-
-  if (updateError) {
-    return { success: false, error: updateError.message }
-  }
-
-  return { success: true }
 }
 
 export async function getUserProfile() {
