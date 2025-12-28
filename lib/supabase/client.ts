@@ -1,10 +1,14 @@
 import { createBrowserClient } from "@supabase/ssr"
 
-let client: ReturnType<typeof createBrowserClient> | undefined
+// Use a global variable to ensure only one client instance across the entire app
+declare global {
+  var supabaseClient: ReturnType<typeof createBrowserClient> | undefined
+}
 
 export function createClient() {
-  if (client) {
-    return client
+  // Use global variable to persist across hot reloads
+  if (globalThis.supabaseClient) {
+    return globalThis.supabaseClient
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -16,7 +20,13 @@ export function createClient() {
     )
   }
 
-  client = createBrowserClient(supabaseUrl, supabaseAnonKey)
+  globalThis.supabaseClient = createBrowserClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  })
 
-  return client
+  return globalThis.supabaseClient
 }
