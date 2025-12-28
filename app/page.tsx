@@ -1,13 +1,15 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Heart, GraduationCap, Beaker, BookOpen, FileText, Spade } from "lucide-react"
+import { Heart, GraduationCap, Beaker, BookOpen, FileText, Spade, LogIn, UserPlus, User, LogOut } from "lucide-react"
 import GameBoard from "@/components/game-board"
 import StrategyGuide from "@/components/strategy-guide"
 import GameSettings from "@/components/game-settings"
+import { getUserProfile, signOut } from "@/lib/actions/game-stats"
 
 type GameMode = "practice" | "real" | "testing" | null
 type View = "home" | "game" | "strategy" | "settings"
@@ -16,7 +18,21 @@ export default function BlackjackApp() {
   const [currentView, setCurrentView] = useState<View>("home")
   const [gameMode, setGameMode] = useState<GameMode>(null)
   const [initialBankroll, setInitialBankroll] = useState(1000)
+  const [userProfile, setUserProfile] = useState<{ name: string; email: string } | null>(null)
   const router = useRouter()
+
+  // Check if user is logged in
+  useEffect(() => {
+    const checkAuth = async () => {
+      const result = await getUserProfile()
+      if (!result.error && result.profile) {
+        setUserProfile({ name: result.profile.name, email: result.profile.email })
+      } else {
+        setUserProfile(null)
+      }
+    }
+    checkAuth()
+  }, [])
 
   // Load stats when starting a game in real mode
   const handleGameModeClick = async (mode: GameMode) => {
@@ -62,6 +78,22 @@ export default function BlackjackApp() {
   const goHome = () => {
     setCurrentView("home")
     setGameMode(null)
+    // Refresh auth status when returning home
+    const checkAuth = async () => {
+      const result = await getUserProfile()
+      if (!result.error && result.profile) {
+        setUserProfile({ name: result.profile.name, email: result.profile.email })
+      } else {
+        setUserProfile(null)
+      }
+    }
+    checkAuth()
+  }
+
+  const handleSignOut = async () => {
+    await signOut()
+    setUserProfile(null)
+    router.refresh()
   }
 
   if (currentView === "game" && gameMode) {
@@ -80,13 +112,52 @@ export default function BlackjackApp() {
     <div className="min-h-screen bg-gradient-to-br from-emerald-700 via-teal-700 to-emerald-800">
       <div className="container mx-auto px-4 py-16">
         {/* Top Navigation Bar */}
-        <div className="flex justify-center items-center mb-8">
+        <div className="flex justify-between items-center mb-8">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-white/10 backdrop-blur-sm rounded-xl flex items-center justify-center">
               <Spade className="h-7 w-7 text-white" fill="white" />
             </div>
             <h1 className="text-2xl font-bold text-white">Blackjack</h1>
           </div>
+          
+          {userProfile ? (
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl px-6 py-3 flex items-center gap-4">
+              <div className="flex items-center gap-2 text-white">
+                <User className="h-5 w-5" />
+                <div>
+                  <div className="font-semibold">{userProfile.name}</div>
+                  <div className="text-xs opacity-80">{userProfile.email}</div>
+                </div>
+              </div>
+              <Button
+                onClick={handleSignOut}
+                variant="outline"
+                size="sm"
+                className="bg-white/10 border-white/20 text-white hover:bg-white/20"
+              >
+                <LogOut className="h-4 w-4 mr-1" />
+                Sign Out
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <Link href="/auth/login">
+                <Button
+                  variant="outline"
+                  className="bg-white/10 backdrop-blur-sm border-white/20 text-white hover:bg-white/20"
+                >
+                  <LogIn className="h-4 w-4 mr-2" />
+                  Login
+                </Button>
+              </Link>
+              <Link href="/auth/sign-up">
+                <Button className="bg-white text-emerald-700 hover:bg-white/90 font-semibold">
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Sign Up
+                </Button>
+              </Link>
+            </div>
+          )}
         </div>
 
         {/* Hero Section */}
