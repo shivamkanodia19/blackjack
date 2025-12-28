@@ -67,6 +67,28 @@ export async function updateGameStats(stats: {
     console.log("[Server] User authenticated, ID:", user.id)
     console.log("[Server] Saving stats:", stats)
 
+    // Ensure profile exists first (required for foreign key)
+    const { data: profileCheck } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", user.id)
+      .single()
+
+    if (!profileCheck) {
+      // Create profile if it doesn't exist
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .insert({
+          id: user.id,
+          name: user.user_metadata?.name || user.email?.split("@")[0] || "Player",
+          email: user.email || "",
+        })
+
+      if (profileError) {
+        console.error("[Server] Error creating profile:", profileError)
+      }
+    }
+
     // Try to update first, if no row exists, insert
     const { data, error: updateError } = await supabase
       .from("game_stats")

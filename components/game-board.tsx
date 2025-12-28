@@ -158,11 +158,18 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
       const result = await updateGameStats(cumulativeStats)
       if (result.success) {
         console.log("[Stats] ✅ Successfully saved game stats!")
+        // Show visual feedback (optional - can be removed if too intrusive)
+        // You could add a toast notification here if you want
       } else {
         console.error("[Stats] ❌ Failed to save game stats:", result.error)
+        if (result.error === "Not authenticated") {
+          console.warn("[Stats] ⚠️ User not logged in - stats cannot be saved")
+          alert("Please log in to save your game stats. Your progress will not be saved until you log in.")
+        }
       }
     } catch (error) {
       console.error("[Stats] ❌ Error saving game stats:", error)
+      console.error("[Stats] Full error details:", JSON.stringify(error, null, 2))
     }
   }
 
