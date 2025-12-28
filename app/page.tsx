@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Heart, GraduationCap, Beaker, BookOpen, FileText, Spade } from "lucide-react"
@@ -15,28 +16,47 @@ export default function BlackjackApp() {
   const [currentView, setCurrentView] = useState<View>("home")
   const [gameMode, setGameMode] = useState<GameMode>(null)
   const [initialBankroll, setInitialBankroll] = useState(1000)
+  const router = useRouter()
 
   // Load stats when starting a game in real mode
   const handleGameModeClick = async (mode: GameMode) => {
-    setGameMode(mode)
-    setCurrentView("game")
-    
-    // Load bankroll from database for real mode
+    // For real mode, require authentication
     if (mode === "real") {
       try {
-        const { getGameStats } = await import("@/lib/actions/game-stats")
-        const result = await getGameStats()
-        if (result.stats?.bankroll) {
-          setInitialBankroll(result.stats.bankroll)
+        const { getUserProfile } = await import("@/lib/actions/game-stats")
+        const profileResult = await getUserProfile()
+        
+        if (profileResult.error || !profileResult.profile) {
+          // User not logged in, redirect to login
+          alert("Please log in to play Real Mode. Your stats will be saved to your account.")
+          router.push("/auth/login")
+          return
+        }
+        
+        // User is logged in, load stats
+        try {
+          const { getGameStats } = await import("@/lib/actions/game-stats")
+          const result = await getGameStats()
+          if (result.stats?.bankroll) {
+            setInitialBankroll(result.stats.bankroll)
+          }
+        } catch (error) {
+          console.error("Failed to load game stats:", error)
+          // Keep default bankroll if load fails
         }
       } catch (error) {
-        console.error("Failed to load game stats:", error)
-        // Keep default bankroll if load fails
+        console.error("Failed to check authentication:", error)
+        alert("Please log in to play Real Mode.")
+        router.push("/auth/login")
+        return
       }
     } else {
       // Reset to default for practice/testing modes
       setInitialBankroll(1000)
     }
+    
+    setGameMode(mode)
+    setCurrentView("game")
   }
 
   const goHome = () => {
