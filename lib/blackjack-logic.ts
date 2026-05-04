@@ -78,131 +78,115 @@ function normalizeUpcard(v: number): number {
   return v
 }
 
+function isTenValueRank(rank: string): boolean {
+  return rank === "10" || rank === "J" || rank === "Q" || rank === "K"
+}
+
 /**
- * Basic strategy for multi-deck H17, DAS, late surrender optional.
- * Inputs mirror your existing API for easy drop-in.
- * - playerTotal: best total after Ace adjustments
- * - dealerUpCard: 2–10 or 11 for Ace
- * - hasAce: player's hand contains an Ace (we still infer true softness via total range)
- * - isPair: first two cards same rank (or equal value for 10s)
- * - canDouble: table allows double (and double after split for pair logic via das flag)
- * - canSurrender: late surrender available
- * - das: double after split allowed (default true)
+ * Multi-deck S17, DAS. Pair detection uses card ranks (not hand total) so A,A is correct.
+ * pairRank1/pairRank2: when both set and equal, pair splitting rules apply.
+ * Surrender is not offered by the table — keep canSurrender false at call sites.
  */
 export function getBasicStrategy(
   playerTotal: number,
   dealerUpCard: number,
-  hasAce: boolean,
-  isPair: boolean,
+  isSoft: boolean,
   canDouble: boolean,
   canSurrender: boolean,
   das = true,
+  pairRank1: string | null = null,
+  pairRank2: string | null = null,
 ): StrategyRecommendation {
   const up = normalizeUpcard(dealerUpCard)
 
-  // PAIR HANDS (assume initial 2 cards)
-  if (isPair) {
-    const pairValue = Math.floor(playerTotal / 2)
+  const isPairHand = pairRank1 != null && pairRank2 != null && pairRank1 === pairRank2
 
-    // A,A
-    if (pairValue === 11) {
-      return { action: "Split", reason: "Always split Aces to start two strong hands" }
+  if (isPairHand && pairRank1) {
+    const r = pairRank1
+
+    if (r === "A") {
+      return { action: "Split", reason: "Always split Aces" }
     }
 
-    // 10,10
-    if (pairValue === 10) {
-      return { action: "Stand", reason: "Never split 10s; 20 is already strong" }
+    if (isTenValueRank(r)) {
+      return { action: "Stand", reason: "Never split 10-value pairs; 20 is already strong" }
     }
 
-    // 9,9
-    if (pairValue === 9) {
+    if (r === "9") {
       if ((up >= 2 && up <= 6) || up === 8 || up === 9) {
-        return { action: "Split", reason: "Split 9s vs 2-9 (except 10/A) for higher EV" }
+        return { action: "Split", reason: "Split 9s vs 2–9 (except 10/A)" }
       }
-      return { action: "Stand", reason: "Stand 18 vs 10/A" }
+      return { action: "Stand", reason: "Stand 18 vs 10 or Ace" }
     }
 
-    // 8,8
-    if (pairValue === 8) {
-      return { action: "Split", reason: "Always split 8s; hard 16 is a weak hand" }
+    if (r === "8") {
+      return { action: "Split", reason: "Always split 8s" }
     }
 
-    // 7,7
-    if (pairValue === 7) {
+    if (r === "7") {
       if (up >= 2 && up <= 7) return { action: "Split", reason: "Split 7s vs 2–7" }
-      return { action: "Hit", reason: "Hit 14 vs 8–A" }
+      return { action: "Hit", reason: "Hit 14 vs 8–Ace" }
     }
 
-    // 6,6
-    if (pairValue === 6) {
+    if (r === "6") {
       if (up >= 2 && up <= 6) return { action: "Split", reason: "Split 6s vs 2–6" }
-      return { action: "Hit", reason: "Hit 12 vs 7–A" }
+      return { action: "Hit", reason: "Hit 12 vs 7–Ace" }
     }
 
-    // 5,5 (treat as hard 10)
-    if (pairValue === 5) {
+    if (r === "5") {
       if (canDouble && up >= 2 && up <= 9) {
-        return { action: "Double", reason: "Double 10 vs 2–9; hit vs 10/A" }
+        return { action: "Double", reason: "Double hard 10 vs 2–9; hit vs 10/A" }
       }
-      return { action: "Hit", reason: "Hit 10 if doubling unavailable or vs 10/A" }
+      return { action: "Hit", reason: "Hit hard 10 if doubling unavailable or vs 10/A" }
     }
 
-    // 4,4
-    if (pairValue === 4) {
+    if (r === "4") {
       if (das && (up === 5 || up === 6)) {
         return { action: "Split", reason: "Split 4s vs 5–6 with DAS" }
       }
       return { action: "Hit", reason: "Hit 8 otherwise" }
     }
 
-    // 3,3 and 2,2
-    if (pairValue === 3 || pairValue === 2) {
+    if (r === "3" || r === "2") {
       if (das) {
         if (up >= 2 && up <= 7) return { action: "Split", reason: "Split 2s/3s vs 2–7 with DAS" }
       } else {
-        if (up >= 3 && up <= 7) return { action: "Split", reason: "Split 2s/3s vs 3–7; hit vs 2,8–A" }
+        if (up >= 3 && up <= 7) return { action: "Split", reason: "Split 2s/3s vs 3–7 without DAS" }
       }
       return { action: "Hit", reason: "Hit small pairs vs strong dealer cards" }
     }
   }
 
-  // SOFT HANDS (true soft if an Ace counted as 11 without bust)
-  const isTrulySoft = hasAce && playerTotal >= 13 && playerTotal <= 21
+  const isTrulySoft = isSoft && playerTotal >= 13 && playerTotal <= 21
 
   if (isTrulySoft) {
-    // Soft 20–21
     if (playerTotal >= 20) {
       return { action: "Stand", reason: "Soft 20–21 are premium totals" }
     }
 
-    // Soft 19 (A,8): H17 double vs 6; otherwise stand
+    // S17: soft 19 vs 6 — stand (no double)
     if (playerTotal === 19) {
-      if (canDouble && up === 6) {
-        return { action: "Double", reason: "Double A,8 vs 6 in H17 for extra value" }
-      }
-      return { action: "Stand", reason: "Stand soft 19 in other spots" }
+      return { action: "Stand", reason: "Stand soft 19 (S17)" }
     }
 
-    // Soft 18 (A,7): H17 adds double vs 2
+    // Soft 18 (A,7): S17 — stand vs 2; double vs 3–6; stand vs 7–8; hit vs 9–A
     if (playerTotal === 18) {
-      if (canDouble && ((up >= 3 && up <= 6) || up === 2)) {
-        return { action: "Double", reason: "Double A,7 vs 2–6 in H17" }
+      if (canDouble && up >= 3 && up <= 6) {
+        return { action: "Double", reason: "Double soft 18 vs 3–6 (S17)" }
       }
-      if (up === 7 || up === 8) {
-        return { action: "Stand", reason: "Stand A,7 vs 7–8" }
+      if (up === 2 || up === 7 || up === 8) {
+        return { action: "Stand", reason: "Stand soft 18 vs 2 or 7–8" }
       }
-      return { action: "Hit", reason: "Hit A,7 vs 9–A to improve EV" }
+      return { action: "Hit", reason: "Hit soft 18 vs 9–Ace" }
     }
 
-    // Soft 17 (A,6)
     if (playerTotal === 17) {
       if (canDouble && up >= 3 && up <= 6) {
-        return { action: "Double", reason: "Double A,6 vs 3–6" }
+        return { action: "Double", reason: "Double soft 17 vs 3–6" }
       }
       return { action: "Hit", reason: "Hit soft 17 otherwise" }
     }
 
-    // Soft 15–16 (A,4 / A,5)
     if (playerTotal === 16 || playerTotal === 15) {
       if (canDouble && up >= 4 && up <= 6) {
         return { action: "Double", reason: "Double soft 15–16 vs 4–6" }
@@ -210,7 +194,6 @@ export function getBasicStrategy(
       return { action: "Hit", reason: "Hit soft 15–16 otherwise" }
     }
 
-    // Soft 13–14 (A,2 / A,3)
     if (playerTotal === 14 || playerTotal === 13) {
       if (canDouble && (up === 5 || up === 6)) {
         return { action: "Double", reason: "Double soft 13–14 vs 5–6" }
@@ -223,50 +206,37 @@ export function getBasicStrategy(
 
   // HARD HANDS
 
-  // 17+
   if (playerTotal >= 17) {
     return { action: "Stand", reason: "Stand on hard 17+ due to bust risk" }
   }
 
-  // 16
   if (playerTotal === 16) {
-    if (canSurrender && (up === 9 || up === 10 || up === 11)) {
-      return { action: "Surrender", reason: "Surrender 16 vs 9/10/A if allowed" }
-    }
-    if (up >= 7) return { action: "Hit", reason: "Hit 16 vs 7–A" }
+    if (up >= 7) return { action: "Hit", reason: "Hit 16 vs 7–Ace" }
     return { action: "Stand", reason: "Stand 16 vs 2–6" }
   }
 
-  // 15
   if (playerTotal === 15) {
-    if (canSurrender && up === 10) {
-      return { action: "Surrender", reason: "Surrender 15 vs 10 if allowed" }
-    }
-    if (up >= 7) return { action: "Hit", reason: "Hit 15 vs 7–A" }
+    if (up >= 7) return { action: "Hit", reason: "Hit 15 vs 7–Ace" }
     return { action: "Stand", reason: "Stand 15 vs 2–6" }
   }
 
-  // 13–14
   if (playerTotal >= 13 && playerTotal <= 14) {
-    if (up >= 7) return { action: "Hit", reason: "Hit 13–14 vs 7–A" }
+    if (up >= 7) return { action: "Hit", reason: "Hit 13–14 vs 7–Ace" }
     return { action: "Stand", reason: "Stand 13–14 vs 2–6" }
   }
 
-  // 12
   if (playerTotal === 12) {
     if (up >= 4 && up <= 6) return { action: "Stand", reason: "Stand 12 vs 4–6" }
-    return { action: "Hit", reason: "Hit 12 vs 2–3 and 7–A" }
+    return { action: "Hit", reason: "Hit 12 vs 2–3 and 7–Ace" }
   }
 
-  // 11: H17 doubles vs Ace
   if (playerTotal === 11) {
     if (canDouble) {
-      return { action: "Double", reason: "Double 11 vs any upcard including Ace in H17" }
+      return { action: "Double", reason: "Double 11 vs any upcard" }
     }
     return { action: "Hit", reason: "Hit 11 if doubling not allowed" }
   }
 
-  // 10
   if (playerTotal === 10) {
     if (canDouble && up >= 2 && up <= 9) {
       return { action: "Double", reason: "Double 10 vs 2–9" }
@@ -274,7 +244,6 @@ export function getBasicStrategy(
     return { action: "Hit", reason: "Hit 10 vs 10/A or if doubling unavailable" }
   }
 
-  // 9
   if (playerTotal === 9) {
     if (canDouble && up >= 3 && up <= 6) {
       return { action: "Double", reason: "Double 9 vs 3–6" }
@@ -282,7 +251,6 @@ export function getBasicStrategy(
     return { action: "Hit", reason: "Hit 9 otherwise" }
   }
 
-  // 8 or less
   return { action: "Hit", reason: "Totals 8 or less cannot bust; improve the hand" }
 }
 

@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { ArrowLeft, RotateCcw, Info, CheckCircle, XCircle, Target, DollarSign, Coins } from "lucide-react"
 import { createDeck, shuffleDeck, dealCard, calculateHandValue, getBasicStrategy } from "@/lib/blackjack-logic"
-import type { Card as PlayingCard, GameState, Hand, SideBet, SessionStats, ActionFeedback } from "@/lib/types"
+import type { Card as PlayingCard, GameState, Hand, SessionStats, ActionFeedback } from "@/lib/types"
 
 interface GameBoardProps {
   mode: "real" | "practice" | "testing"
@@ -18,7 +18,7 @@ interface GameBoardProps {
 
 type DealerScore = { total: number; isSoft: boolean }
 
-// Helper: compute total + soft flag (needed for soft-17 rule and soft detection)
+// Helper: compute total + soft flag (dealer uses S17 in dealerPlay; flag used for hand typing)
 function valueWithSoft(cards: PlayingCard[]): DealerScore {
   let total = 0
   let aces = 0
@@ -291,7 +291,6 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
     return gameState.bankroll - gameState.pendingBets
   }
 
-  const getTotalSideBets = () => gameState.sideBets.reduce((sum, b) => sum + b.amount, 0)
   const getCurrentHand = () => gameState.playerHands[gameState.currentHandIndex]
 
   const initializeGame = () => {
@@ -338,7 +337,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
       current.value,
       dealerUpRank,
       current.canDouble ? 1 : 0,
-      gameState.canSurrender ? 1 : 0,
+      0,
       playerAction,
     ].join("-")
 
@@ -347,15 +346,18 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
     const playerTotal = current.value
     const dealerUpCard = gameState.dealerHand[0]?.value || 0
     const soft = isSoftHand(current.cards)
-    const isPair = current.cards.length === 2 && current.cards[0].rank === current.cards[1].rank
+    const pr1 = current.cards.length === 2 ? current.cards[0].rank : null
+    const pr2 = current.cards.length === 2 ? current.cards[1].rank : null
 
     const recommendation = getBasicStrategy(
       playerTotal,
       dealerUpCard,
       soft,
-      isPair,
       current.canDouble,
-      gameState.canSurrender,
+      false,
+      true,
+      pr1,
+      pr2,
     )
     const isCorrect = playerAction === recommendation.action
 
@@ -399,18 +401,17 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
     const dealerIsBlackjack = finalDealerValue === 21 && dealerHandToUse.length === 2
 
     let mainBetProfit = 0
-    let sideBetProfit = 0
     let handsWon = 0
     let handsLost = 0
     let handsPushed = 0
 
     hands.forEach((hand) => {
       const finalPlayerValue = calculateHandValue(hand.cards)
-      const playerIsBlackjack = hand.isBlackjack || (finalPlayerValue === 21 && hand.cards.length === 2)
+      const isNatural = hand.isNaturalBlackjack === true
       const { result: handResult, profit } = determineHandOutcome(
         finalPlayerValue,
         finalDealerValue,
-        playerIsBlackjack,
+        isNatural,
         dealerIsBlackjack,
         hand.bet,
       )
@@ -420,14 +421,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
       else handsPushed++
     })
 
-    if (mode === "real") {
-      gameState.sideBets.forEach((bet) => {
-        if (bet.result === "win" && bet.payout) sideBetProfit += bet.payout - bet.amount
-        else sideBetProfit -= bet.amount
-      })
-    }
-
-    const totalProfit = mainBetProfit + sideBetProfit
+    const totalProfit = mainBetProfit
 
     let message = ""
     if (mode === "testing") {
@@ -438,9 +432,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
       const isSingleHand = hands.length === 1
       const firstHand = isSingleHand ? hands[0] : undefined
       const isNaturalBJSingle =
-        isSingleHand &&
-        !!firstHand &&
-        (firstHand.isBlackjack === true || (firstHand.cards.length === 2 && calculateHandValue(firstHand.cards) === 21))
+        isSingleHand && !!firstHand && firstHand.isNaturalBlackjack === true
 
       if (result === "immediate-finish") {
         message = isNaturalBJSingle ? "Blackjack!" : "Dealer Blackjack!"
@@ -502,6 +494,13 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
     }
 
     const newBankroll = mode === "testing" ? gameState.bankroll : gameState.bankroll + totalProfit
+    if (newBankroll < 0) {
+      console.warn("[Blackjack] Bankroll negative after settlement — check payout logic", {
+        newBankroll,
+        totalProfit,
+        mainBetProfit,
+      })
+    }
 
     setGameState((prev) => ({
       ...prev,
@@ -533,36 +532,11 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
       ...prev,
       mainBet: mode === "testing" ? 10 : amount,
       pendingBets: mode === "testing" ? 10 : amount,
-      gamePhase: mode === "practice" || mode === "testing" ? "playing" : "sideBets",
-      message: mode === "practice" || mode === "testing" ? "Choose your action" : "Place side bets or deal cards",
+      gamePhase: "playing",
+      message: "Choose your action",
     }))
 
-    if (mode === "practice" || mode === "testing") {
-      setTimeout(() => dealCards(), 100)
-    }
-  }
-
-  const placeSideBet = (type: SideBet["type"], amount: number) => {
-    if (mode !== "real" || type !== "perfectPairs") return
-    if (amount > getAvailableMoney() || amount <= 0) return
-    const previous = gameState.sideBets.find((b) => b.type === type)
-    const addPending = amount - (previous?.amount || 0)
-    setGameState((prev) => ({
-      ...prev,
-      sideBets: [...prev.sideBets.filter((b) => b.type !== type), { type, amount }],
-      pendingBets: prev.pendingBets + addPending,
-    }))
-  }
-
-  const removeSideBet = (type: SideBet["type"]) => {
-    if (mode !== "real") return
-    const removed = gameState.sideBets.find((b) => b.type === type)
-    if (!removed) return
-    setGameState((prev) => ({
-      ...prev,
-      sideBets: prev.sideBets.filter((b) => b.type !== type),
-      pendingBets: prev.pendingBets - removed.amount,
-    }))
+    setTimeout(() => dealCards(), 100)
   }
 
   const dealCards = () => {
@@ -583,34 +557,21 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
       const playerScore = calculateHandValue(playerHand)
       const dealerFullScore = valueWithSoft(dealerHand).total
 
-      const playerIsBlackjack = playerScore === 21
+      const playerIsNatural = playerScore === 21 && playerHand.length === 2
       const dealerIsBlackjack = dealerFullScore === 21 && dealerHand.length === 2
 
       const initialHand: Hand = {
         cards: playerHand,
         value: playerScore,
         bet: prev.mainBet,
-        isComplete: dealerIsBlackjack || playerIsBlackjack,
-        canDouble: !dealerIsBlackjack && !playerIsBlackjack,
-        canSplit: !dealerIsBlackjack && !playerIsBlackjack && playerHand[0].rank === playerHand[1].rank,
-        isBlackjack: playerIsBlackjack,
+        isComplete: dealerIsBlackjack || playerIsNatural,
+        canDouble: !dealerIsBlackjack && !playerIsNatural,
+        canSplit: !dealerIsBlackjack && !playerIsNatural && playerHand[0].rank === playerHand[1].rank,
+        isNaturalBlackjack: playerIsNatural,
+        isBlackjack: playerIsNatural,
       }
 
-      let processedSideBets: SideBet[] = []
-      if (mode === "real") {
-        processedSideBets = prev.sideBets
-          .filter((s) => s.type === "perfectPairs")
-          .map((sideBet) => {
-            const result = evaluateSideBet(sideBet.type, playerHand, dealerHand[0], sideBet.amount)
-            return {
-              ...sideBet,
-              result: result.win ? ("win" as const) : ("lose" as const),
-              payout: result.payout,
-            }
-          })
-      }
-
-      if (dealerIsBlackjack || playerIsBlackjack) {
+      if (dealerIsBlackjack || playerIsNatural) {
         const nextState: GameState = {
           ...prev,
           deck,
@@ -619,7 +580,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
           dealerScore: dealerFullScore,
           gamePhase: "finished",
           message: dealerIsBlackjack ? "Dealer Blackjack!" : "Player Blackjack!",
-          sideBets: processedSideBets,
+          sideBets: [],
           canSurrender: false,
         }
 
@@ -637,39 +598,22 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
         currentHandIndex: 0,
         gamePhase: "playing",
         message: "Choose your action",
-        canSurrender: true,
-        sideBets: processedSideBets,
+        canSurrender: false,
+        sideBets: [],
       }
     })
   }
 
-  const evaluateSideBet = (
-    type: SideBet["type"],
-    playerHand: PlayingCard[],
-    dealerUpCard: PlayingCard,
-    betAmount: number,
-  ) => {
-    switch (type) {
-      case "perfectPairs": {
-        if (playerHand[0].rank === playerHand[1].rank) {
-          if (playerHand[0].suit === playerHand[1].suit) return { win: true, payout: betAmount + betAmount * 25 }
-          const isBothBlackOrBothRed =
-            (playerHand[0].suit === "♠" || playerHand[0].suit === "♣") ===
-            (playerHand[1].suit === "♠" || playerHand[1].suit === "♣")
-          if (isBothBlackOrBothRed) return { win: true, payout: betAmount + betAmount * 12 }
-          return { win: true, payout: betAmount + betAmount * 6 }
-        }
-        return { win: false, payout: 0 }
-      }
-      default:
-        return { win: false, payout: 0 }
-    }
-  }
-
   const hit = () => {
-    if (gameState.gamePhase !== "playing") return
+    if (gameState.gamePhase !== "playing") {
+      console.warn("[Blackjack] Hit ignored: invalid phase", gameState.gamePhase)
+      return
+    }
     const current = getCurrentHand()
-    if (!current || current.isComplete) return // Prevent hitting on completed hands
+    if (!current || current.isComplete) {
+      console.warn("[Blackjack] Hit ignored: no active hand")
+      return
+    }
 
     processTestingFeedback("Hit")
 
@@ -713,9 +657,15 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
   }
 
   const stand = () => {
-    if (gameState.gamePhase !== "playing") return
+    if (gameState.gamePhase !== "playing") {
+      console.warn("[Blackjack] Stand ignored: invalid phase", gameState.gamePhase)
+      return
+    }
     const current = getCurrentHand()
-    if (!current || current.isComplete) return // Prevent standing on completed hands
+    if (!current || current.isComplete) {
+      console.warn("[Blackjack] Stand ignored: no active hand")
+      return
+    }
 
     processTestingFeedback("Stand")
 
@@ -731,9 +681,18 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
 
   const doubleDown = () => {
     const current = getCurrentHand()
-    if (!current?.canDouble || current.isComplete) return // Added isComplete check
-    if (gameState.gamePhase !== "playing") return
-    if (mode !== "testing" && current.bet > getAvailableMoney()) return
+    if (!current?.canDouble || current.isComplete) {
+      console.warn("[Blackjack] Double ignored: not allowed or hand complete")
+      return
+    }
+    if (gameState.gamePhase !== "playing") {
+      console.warn("[Blackjack] Double ignored: invalid phase", gameState.gamePhase)
+      return
+    }
+    if (mode !== "testing" && current.bet > getAvailableMoney()) {
+      console.warn("[Blackjack] Double ignored: insufficient bankroll")
+      return
+    }
 
     processTestingFeedback("Double")
 
@@ -777,9 +736,18 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
 
   const split = () => {
     const current = getCurrentHand()
-    if (!current?.canSplit || current.isComplete) return // Added isComplete check
-    if (gameState.gamePhase !== "playing") return
-    if (mode !== "testing" && current.bet > getAvailableMoney()) return
+    if (!current?.canSplit || current.isComplete) {
+      console.warn("[Blackjack] Split ignored: not allowed or hand complete")
+      return
+    }
+    if (gameState.gamePhase !== "playing") {
+      console.warn("[Blackjack] Split ignored: invalid phase", gameState.gamePhase)
+      return
+    }
+    if (mode !== "testing" && current.bet > getAvailableMoney()) {
+      console.warn("[Blackjack] Split ignored: insufficient bankroll")
+      return
+    }
 
     processTestingFeedback("Split")
 
@@ -854,29 +822,6 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
     moveToNextHand()
   }
 
-  const surrender = () => {
-    if (!gameState.canSurrender) return
-    processTestingFeedback("Surrender")
-    setSessionStats((prev) => ({ ...prev, totalMoves: prev.totalMoves + 1 }))
-
-    const loss = gameState.mainBet / 2
-
-    setGameState((prev) => ({
-      ...prev,
-      bankroll: mode === "testing" ? prev.bankroll : prev.bankroll - loss,
-      pendingBets: 0,
-      message: mode === "testing" ? "Surrendered" : `Surrendered. -$${loss}`,
-      gamePhase: "finished",
-      dealerScore: valueWithSoft(prev.dealerHand).total,
-    }))
-
-    setSessionStats((prev) => ({
-      ...prev,
-      handsPlayed: prev.handsPlayed + 1,
-      handsLost: prev.handsLost + 1,
-    }))
-  }
-
   const moveToNextHand = () => {
     setTimeout(() => {
       setGameState((prev) => {
@@ -931,10 +876,11 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
       snapshotDeck = shuffleDeck(createDeck(6))
     }
 
+    // S17: stand on all 17s (hard or soft)
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const v = valueWithSoft(snapshotDealer)
-      if (v.total < 17 || (v.total === 17 && v.isSoft)) {
+      if (v.total < 17) {
         snapshotDealer.push(dealCard(snapshotDeck))
         continue
       }
@@ -958,18 +904,45 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
   const determineHandOutcome = (
     playerValue: number,
     dealerValue: number,
-    playerIsBlackjack: boolean,
+    isPlayerNaturalBlackjack: boolean,
     dealerIsBlackjack: boolean,
     bet: number,
   ) => {
-    if (playerValue > 21) return { result: "loss" as const, profit: -bet }
-    if (dealerValue > 21) return { result: "win" as const, profit: bet }
-    if (playerIsBlackjack && dealerIsBlackjack) return { result: "push", profit: 0 }
-    if (playerIsBlackjack && !dealerIsBlackjack) return { result: "win", profit: Math.floor(bet * 1.5) }
-    if (dealerIsBlackjack && !playerIsBlackjack) return { result: "loss", profit: -bet }
-    if (playerValue === dealerValue) return { result: "push", profit: 0 }
-    if (playerValue > dealerValue) return { result: "win", profit: bet }
-    return { result: "loss", profit: -bet }
+    let outcome: { result: "win" | "loss" | "push"; profit: number }
+    if (playerValue > 21) outcome = { result: "loss", profit: -bet }
+    else if (dealerValue > 21) outcome = { result: "win", profit: bet }
+    else if (isPlayerNaturalBlackjack && dealerIsBlackjack) outcome = { result: "push", profit: 0 }
+    else if (isPlayerNaturalBlackjack && !dealerIsBlackjack)
+      outcome = { result: "win", profit: Math.floor(bet * 1.5) }
+    else if (dealerIsBlackjack && !isPlayerNaturalBlackjack) outcome = { result: "loss", profit: -bet }
+    else if (playerValue === dealerValue) outcome = { result: "push", profit: 0 }
+    else if (playerValue > dealerValue) outcome = { result: "win", profit: bet }
+    else outcome = { result: "loss", profit: -bet }
+
+    const { profit } = outcome
+    let expectedProfit: number
+    if (playerValue > 21) expectedProfit = -bet
+    else if (dealerValue > 21) expectedProfit = bet
+    else if (isPlayerNaturalBlackjack && dealerIsBlackjack) expectedProfit = 0
+    else if (isPlayerNaturalBlackjack && !dealerIsBlackjack) expectedProfit = Math.floor(bet * 1.5)
+    else if (dealerIsBlackjack && !isPlayerNaturalBlackjack) expectedProfit = -bet
+    else if (playerValue === dealerValue) expectedProfit = 0
+    else if (playerValue > dealerValue) expectedProfit = bet
+    else expectedProfit = -bet
+
+    if (profit !== expectedProfit) {
+      console.warn("[Blackjack] Payout mismatch vs expectation", {
+        playerValue,
+        dealerValue,
+        isPlayerNaturalBlackjack,
+        dealerIsBlackjack,
+        bet,
+        profit,
+        expectedProfit,
+      })
+    }
+
+    return outcome
   }
 
   const getStrategyRecommendation = () => {
@@ -980,9 +953,10 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
     const playerTotal = current.value
     const dealerUpCard = gameState.dealerHand[0]?.value || 0
     const soft = isSoftHand(current.cards)
-    const isPair = current.cards.length === 2 && current.cards[0].rank === current.cards[1].rank
+    const pr1 = current.cards.length === 2 ? current.cards[0].rank : null
+    const pr2 = current.cards.length === 2 ? current.cards[1].rank : null
 
-    return getBasicStrategy(playerTotal, dealerUpCard, soft, isPair, current.canDouble, gameState.canSurrender)
+    return getBasicStrategy(playerTotal, dealerUpCard, soft, current.canDouble, false, true, pr1, pr2)
   }
 
   const getModeConfig = () => {
@@ -993,7 +967,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
           variant: "destructive" as const,
           showHints: false,
           showFeedback: false,
-          allowSideBets: true,
+          allowSideBets: false,
         }
       case "practice":
         return {
@@ -1124,7 +1098,9 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
                     <div className="flex items-center gap-2">
                       <span className={`text-lg ${hand.value > 21 ? "text-red-400" : ""}`}>
                         {hand.value}
-                        {hand.isBlackjack && <span className="text-yellow-400 ml-1">BJ</span>}
+                        {(hand.isNaturalBlackjack || hand.isBlackjack) && (
+                          <span className="text-yellow-400 ml-1">BJ</span>
+                        )}
                       </span>
                       {mode !== "testing" && (
                         <div className="flex flex-col items-end">
@@ -1202,12 +1178,6 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
                           <span className="text-sm">Main Bet: </span>
                           <span className="font-bold">${gameState.mainBet}</span>
                         </div>
-                        {getTotalSideBets() > 0 && (
-                          <div className="side-bet-area rounded px-3 py-1 text-amber-200">
-                            <span className="text-sm">Side Bets: </span>
-                            <span className="font-bold">${getTotalSideBets()}</span>
-                          </div>
-                        )}
                       </div>
                     </div>
                   )}
@@ -1257,53 +1227,6 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
                   </div>
                 )}
 
-                {gameState.gamePhase === "sideBets" && modeConfig.allowSideBets && (
-                  <div className="space-y-4">
-                    <h3 className="text-white text-lg font-semibold text-center">Side Bets (Optional)</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {[{ type: "perfectPairs" as const, name: "Perfect Pairs", maxPayout: "25:1" }].map((sideBet) => {
-                        const currentBet = gameState.sideBets.find((bet) => bet.type === sideBet.type)
-                        return (
-                          <div key={sideBet.type} className="side-bet-area p-3">
-                            <div className="text-amber-200 text-sm font-medium">{sideBet.name}</div>
-                            <div className="text-amber-300 text-xs">Max payout: {sideBet.maxPayout}</div>
-                            <div className="flex gap-1 mt-2 flex-wrap">
-                              {[5, 10, 25].map((amount) => (
-                                <Button
-                                  key={amount}
-                                  size="sm"
-                                  onClick={() => placeSideBet(sideBet.type, amount)}
-                                  disabled={amount > getAvailableMoney()}
-                                  className={`text-xs casino-button ${currentBet?.amount === amount ? "bg-yellow-600" : ""}`}
-                                >
-                                  ${amount}
-                                </Button>
-                              ))}
-                              {currentBet && (
-                                <Button
-                                  size="sm"
-                                  onClick={() => removeSideBet(sideBet.type)}
-                                  className="bg-red-600 hover:bg-red-700 text-xs"
-                                >
-                                  Clear
-                                </Button>
-                              )}
-                            </div>
-                            {currentBet && (
-                              <div className="text-yellow-200 text-xs mt-1">Bet: ${currentBet.amount}</div>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                    <div className="flex justify-center">
-                      <Button onClick={dealCards} className="casino-button bg-green-700 hover:bg-green-600">
-                        Deal Cards
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
                 {gameState.gamePhase === "playing" && currentHand && !currentHand.isComplete && (
                   <div className="flex gap-2 justify-center flex-wrap">
                     <Button onClick={hit} className="casino-button bg-red-700 hover:bg-red-600">
@@ -1320,11 +1243,6 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
                     {currentHand.canSplit && getAvailableMoney() >= currentHand.bet && (
                       <Button onClick={split} className="casino-button bg-orange-700 hover:bg-orange-600">
                         Split
-                      </Button>
-                    )}
-                    {gameState.canSurrender && gameState.playerHands.length === 1 && (
-                      <Button onClick={surrender} className="casino-button bg-gray-700 hover:bg-gray-600">
-                        Surrender
                       </Button>
                     )}
                   </div>
@@ -1396,26 +1314,6 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
               </Card>
             )}
 
-            {gameState.sideBets.length > 0 &&
-              gameState.gamePhase !== "betting" &&
-              gameState.gamePhase !== "sideBets" && (
-                <Card className="side-bet-area casino-card">
-                  <CardHeader>
-                    <CardTitle className="text-amber-200">Side Bet Results</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {gameState.sideBets.map((bet, index) => (
-                      <div key={index} className="flex justify-between text-white">
-                        <span className="capitalize">{bet.type.replace(/([A-Z])/g, " $1").trim()}:</span>
-                        <span className={bet.result === "win" ? "text-green-400" : "text-red-400"}>
-                          {bet.result === "win" ? `+$${bet.payout! - bet.amount}` : `-$${bet.amount}`}
-                        </span>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
-
             <Card className="money-display casino-card">
               <CardHeader>
                 <CardTitle className="text-yellow-300">Session Stats</CardTitle>
@@ -1450,11 +1348,11 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
               </CardHeader>
               <CardContent className="text-green-200 text-sm space-y-1">
                 <p>• Get as close to 21 as possible</p>
-                <p>• Dealer hits on soft 17</p>
-                <p>• Blackjack pays 3:2</p>
+                <p>• Dealer stands on soft 17 (S17)</p>
+                <p>• Blackjack pays 3:2 on initial natural only</p>
                 <p>• Split same ranks only</p>
                 <p>• Double after split allowed</p>
-                <p>• Surrender available</p>
+                <p>• No insurance or side bets</p>
               </CardContent>
             </Card>
           </div>

@@ -21,6 +21,8 @@ export interface Hand {
   isComplete: boolean
   canDouble: boolean
   canSplit: boolean
+  /** Initial-deal natural only (2 cards); split/post-split 21 is never natural */
+  isNaturalBlackjack?: boolean
   isBlackjack?: boolean
 }
 
