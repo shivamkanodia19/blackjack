@@ -5,6 +5,7 @@ import type { Room, RoomConfig, RoomPlayer, RoomHandResult } from "@/lib/types/r
 
 export interface UseLiveRoomReturn {
   room: Room | null
+  playerId: string
   isLoading: boolean
   error: string | null
   createRoom: (playerName: string, config?: Partial<RoomConfig>) => Promise<Room>
@@ -226,6 +227,7 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
 
   return {
     room,
+    playerId: playerIdRef.current,
     isLoading,
     error,
     createRoom,

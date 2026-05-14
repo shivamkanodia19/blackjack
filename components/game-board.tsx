@@ -1,50 +1,30 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
-import { ArrowLeft, RotateCcw, Info, CheckCircle, XCircle, Target, DollarSign, Coins } from "lucide-react"
+import { PlayingCard } from "@/components/ui/playing-card"
+import { ArrowLeft, RotateCcw, Info, CheckCircle, XCircle, Target } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { createDeck, shuffleDeck, dealCard, calculateHandValue, getBasicStrategy } from "@/lib/blackjack-logic"
-import type { Card as PlayingCard, GameState, Hand, SessionStats, ActionFeedback } from "@/lib/types"
+import { scoreHand, settleHand, runDealerTurn, profitDollars } from "@/lib/blackjack/engine"
+import { DEFAULT_RULES } from "@/lib/blackjack/rules"
+import type { Card as PlayingCardType, GameState, Hand, SessionStats, ActionFeedback } from "@/lib/types"
 
 interface GameBoardProps {
   mode: "real" | "practice" | "testing"
   onExit: () => void
-  initialBankroll?: number // Added initialBankroll prop
+  initialBankroll?: number
+  /** Override whether strategy hints are shown (default: true for practice, false otherwise) */
+  showHints?: boolean
+  /** Called after every strategy decision in testing/training mode */
+  onStrategyDecision?: (isCorrect: boolean, playerAction: string, recommendedAction: string, reason: string) => void
+  /** Called when a hand fully settles — useful for live room turn advancement */
+  onHandComplete?: (profit: number, outcome: "win" | "loss" | "push") => void
 }
 
-type DealerScore = { total: number; isSoft: boolean }
-
-// Helper: compute total + soft flag (dealer uses S17 in dealerPlay; flag used for hand typing)
-function valueWithSoft(cards: PlayingCard[]): DealerScore {
-  let total = 0
-  let aces = 0
-  for (const c of cards) {
-    if (c.rank === "A") {
-      aces += 1
-      total += 1
-    } else {
-      total += c.value
-    }
-  }
-  let isSoft = false
-  if (aces > 0 && total + 10 <= 21) {
-    total += 10
-    isSoft = true
-  }
-  return { total, isSoft }
-}
-
-// Soft hand detector for player strategy determination
-function isSoftHand(cards: PlayingCard[]): boolean {
-  const v = valueWithSoft(cards)
-  return v.isSoft
-}
-
-export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: GameBoardProps) {
+export default function GameBoard({ mode, onExit, initialBankroll = 1000, showHints: showHintsProp, onStrategyDecision, onHandComplete }: GameBoardProps) {
   const [gameState, setGameState] = useState<GameState>({
     deck: [],
     playerHands: [],
@@ -345,7 +325,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
 
     const playerTotal = current.value
     const dealerUpCard = gameState.dealerHand[0]?.value || 0
-    const soft = isSoftHand(current.cards)
+    const soft = scoreHand(current.cards).soft
     const pr1 = current.cards.length === 2 ? current.cards[0].rank : null
     const pr2 = current.cards.length === 2 ? current.cards[1].rank : null
 
@@ -370,6 +350,8 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
     })
     setLastDecisionState(decisionState)
 
+    onStrategyDecision?.(isCorrect, playerAction, recommendation.action, recommendation.reason)
+
     setHandDecisions((n) => {
       const next = n + 1
       handDecisionsRef.current = next
@@ -391,13 +373,12 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
     }))
   }
 
-  const endGame = (result: string, finalDealerHand?: PlayingCard[], handsSnapshot?: Hand[]) => {
+  const endGame = (result: string, finalDealerHand?: PlayingCardType[], handsSnapshot?: Hand[]) => {
     const hands = handsSnapshot || gameState.playerHands
     const dealerHandToUse = finalDealerHand || gameState.dealerHand
     if (result === "surrender") return
 
-    const dealerScore = valueWithSoft(dealerHandToUse)
-    const finalDealerValue = dealerScore.total
+    const finalDealerValue = scoreHand(dealerHandToUse).total
     const dealerIsBlackjack = finalDealerValue === 21 && dealerHandToUse.length === 2
 
     let mainBetProfit = 0
@@ -408,14 +389,15 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
     hands.forEach((hand) => {
       const finalPlayerValue = calculateHandValue(hand.cards)
       const isNatural = hand.isNaturalBlackjack === true
-      const { result: handResult, profit } = determineHandOutcome(
+      const { result: handResult, profitMultiplier } = settleHand(
         finalPlayerValue,
         finalDealerValue,
         isNatural,
         dealerIsBlackjack,
-        hand.bet,
+        false,
+        DEFAULT_RULES,
       )
-      mainBetProfit += profit
+      mainBetProfit += profitDollars(profitMultiplier, hand.bet)
       if (handResult === "win") handsWon++
       else if (handResult === "loss") handsLost++
       else handsPushed++
@@ -507,7 +489,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
       bankroll: newBankroll,
       pendingBets: 0,
       message,
-      dealerScore: valueWithSoft(dealerHandToUse).total,
+      dealerScore: scoreHand(dealerHandToUse).total,
     }))
 
     setSessionStats((prev) => ({
@@ -519,6 +501,11 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
     }))
 
     resetHandCounters()
+
+    if (onHandComplete) {
+      const outcome = handsWon > handsLost ? "win" : handsLost > handsWon ? "loss" : "push"
+      onHandComplete(totalProfit, outcome)
+    }
 
     if (mode === "real" && newBankroll <= 0) {
       setGameOver(true)
@@ -546,8 +533,8 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
         deck = shuffleDeck(createDeck(6))
       }
 
-      const playerHand: PlayingCard[] = []
-      const dealerHand: PlayingCard[] = []
+      const playerHand: PlayingCardType[] = []
+      const dealerHand: PlayingCardType[] = []
 
       playerHand.push(dealCard(deck))
       dealerHand.push(dealCard(deck))
@@ -555,7 +542,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
       dealerHand.push(dealCard(deck))
 
       const playerScore = calculateHandValue(playerHand)
-      const dealerFullScore = valueWithSoft(dealerHand).total
+      const dealerFullScore = scoreHand(dealerHand).total
 
       const playerIsNatural = playerScore === 21 && playerHand.length === 2
       const dealerIsBlackjack = dealerFullScore === 21 && dealerHand.length === 2
@@ -760,7 +747,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
       const newPlayerHands = [...prev.playerHands]
       const originalHand = { ...current }
 
-      const mkHand = (card: PlayingCard): Hand => ({
+      const mkHand = (card: PlayingCardType): Hand => ({
         cards: [card],
         value: calculateHandValue([card]),
         bet: originalHand.bet,
@@ -778,7 +765,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
       firstHand.value = calculateHandValue(firstHand.cards)
       secondHand.value = calculateHandValue(secondHand.cards)
 
-      const allowFurtherSplit = (cards: PlayingCard[]) =>
+      const allowFurtherSplit = (cards: PlayingCardType[]) =>
         cards.length === 2 && cards[0].rank === cards[1].rank && newPlayerHands.length < 4
 
       firstHand.canSplit = allowFurtherSplit(firstHand.cards)
@@ -843,7 +830,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
         } else {
           const allHandsBusted = prev.playerHands.every((hand) => calculateHandValue(hand.cards) > 21)
           if (allHandsBusted) {
-            const dealerTotal = valueWithSoft(prev.dealerHand).total
+            const dealerTotal = scoreHand(prev.dealerHand).total
             const snapshotHands = [...prev.playerHands]
             const snapshotDealer = [...prev.dealerHand]
 
@@ -869,80 +856,27 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
   }
 
   const dealerPlay = () => {
-    const snapshotDealer = [...gameState.dealerHand]
     let snapshotDeck = [...gameState.deck]
-
     if (snapshotDeck.length < 10) {
       snapshotDeck = shuffleDeck(createDeck(6))
     }
 
-    // S17: stand on all 17s (hard or soft)
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const v = valueWithSoft(snapshotDealer)
-      if (v.total < 17) {
-        snapshotDealer.push(dealCard(snapshotDeck))
-        continue
-      }
-      break
-    }
-
-    const finalDealerScore = valueWithSoft(snapshotDealer).total
+    const { cards: finalDealerCards, shoe: remainingDeck } = runDealerTurn(
+      gameState.dealerHand,
+      snapshotDeck,
+      DEFAULT_RULES,
+    )
     const snapshotHands = [...gameState.playerHands]
 
     setGameState((prev) => ({
       ...prev,
-      deck: snapshotDeck,
-      dealerHand: snapshotDealer,
-      dealerScore: finalDealerScore,
+      deck: remainingDeck,
+      dealerHand: finalDealerCards,
+      dealerScore: scoreHand(finalDealerCards).total,
       gamePhase: "finished",
     }))
 
-    setTimeout(() => endGame("dealer-complete", snapshotDealer, snapshotHands), mode === "testing" ? 0 : 1000)
-  }
-
-  const determineHandOutcome = (
-    playerValue: number,
-    dealerValue: number,
-    isPlayerNaturalBlackjack: boolean,
-    dealerIsBlackjack: boolean,
-    bet: number,
-  ) => {
-    let outcome: { result: "win" | "loss" | "push"; profit: number }
-    if (playerValue > 21) outcome = { result: "loss", profit: -bet }
-    else if (dealerValue > 21) outcome = { result: "win", profit: bet }
-    else if (isPlayerNaturalBlackjack && dealerIsBlackjack) outcome = { result: "push", profit: 0 }
-    else if (isPlayerNaturalBlackjack && !dealerIsBlackjack)
-      outcome = { result: "win", profit: Math.floor(bet * 1.5) }
-    else if (dealerIsBlackjack && !isPlayerNaturalBlackjack) outcome = { result: "loss", profit: -bet }
-    else if (playerValue === dealerValue) outcome = { result: "push", profit: 0 }
-    else if (playerValue > dealerValue) outcome = { result: "win", profit: bet }
-    else outcome = { result: "loss", profit: -bet }
-
-    const { profit } = outcome
-    let expectedProfit: number
-    if (playerValue > 21) expectedProfit = -bet
-    else if (dealerValue > 21) expectedProfit = bet
-    else if (isPlayerNaturalBlackjack && dealerIsBlackjack) expectedProfit = 0
-    else if (isPlayerNaturalBlackjack && !dealerIsBlackjack) expectedProfit = Math.floor(bet * 1.5)
-    else if (dealerIsBlackjack && !isPlayerNaturalBlackjack) expectedProfit = -bet
-    else if (playerValue === dealerValue) expectedProfit = 0
-    else if (playerValue > dealerValue) expectedProfit = bet
-    else expectedProfit = -bet
-
-    if (profit !== expectedProfit) {
-      console.warn("[Blackjack] Payout mismatch vs expectation", {
-        playerValue,
-        dealerValue,
-        isPlayerNaturalBlackjack,
-        dealerIsBlackjack,
-        bet,
-        profit,
-        expectedProfit,
-      })
-    }
-
-    return outcome
+    setTimeout(() => endGame("dealer-complete", finalDealerCards, snapshotHands), mode === "testing" ? 0 : 1000)
   }
 
   const getStrategyRecommendation = () => {
@@ -952,7 +886,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
 
     const playerTotal = current.value
     const dealerUpCard = gameState.dealerHand[0]?.value || 0
-    const soft = isSoftHand(current.cards)
+    const soft = scoreHand(current.cards).soft
     const pr1 = current.cards.length === 2 ? current.cards[0].rank : null
     const pr2 = current.cards.length === 2 ? current.cards[1].rank : null
 
@@ -962,31 +896,13 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
   const getModeConfig = () => {
     switch (mode) {
       case "real":
-        return {
-          title: "Real Money Simulator",
-          variant: "destructive" as const,
-          showHints: false,
-          showFeedback: false,
-          allowSideBets: false,
-        }
+        return { title: "Solo Session", showHints: showHintsProp ?? false, showFeedback: false }
       case "practice":
-        return {
-          title: "Practice Mode",
-          variant: "secondary" as const,
-          showHints: true,
-          showFeedback: false,
-          allowSideBets: false,
-        }
+        return { title: "Practice Mode", showHints: showHintsProp ?? true, showFeedback: false }
       case "testing":
-        return {
-          title: "Testing Mode",
-          variant: "default" as const,
-          showHints: false,
-          showFeedback: true,
-          allowSideBets: false,
-        }
+        return { title: "Training Mode", showHints: showHintsProp ?? false, showFeedback: true }
       default:
-        return { title: "", variant: "outline" as const, showHints: false, showFeedback: false, allowSideBets: false }
+        return { title: "", showHints: false, showFeedback: false }
     }
   }
 
@@ -998,365 +914,395 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000 }: Game
 
   if (gameOver && mode === "real") {
     return (
-      <div className="min-h-screen casino-felt p-4 flex items-center justify-center">
-        <Card className="casino-card max-w-md w-full">
-          <CardHeader>
-            <CardTitle className="text-white text-center text-2xl">Game Over</CardTitle>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            <p className="text-white text-lg">You're out of money!</p>
-            <div className="space-y-2 text-green-200">
-              <p>Hands Played: {sessionStats.handsPlayed}</p>
-              <p>Win Rate: {winRate}%</p>
+      <div className="table-felt min-h-screen flex items-center justify-center p-4">
+        <div
+          className="max-w-sm w-full rounded-2xl p-8 text-center space-y-5"
+          style={{ background: "rgba(15,23,42,0.97)", border: "1px solid rgba(71,85,105,0.4)" }}
+        >
+          <div className="text-5xl">🃏</div>
+          <div>
+            <h2 className="text-2xl font-bold text-white">Session Over</h2>
+            <p className="text-gray-400 text-sm mt-1">Your session stack ran out.</p>
+          </div>
+          <div className="rounded-xl p-4 space-y-2" style={{ background: "rgba(30,41,59,0.6)" }}>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-400">Hands played</span>
+              <span className="text-white font-semibold">{sessionStats.handsPlayed}</span>
             </div>
-            <div className="space-y-2">
-              <Button onClick={initializeGame} className="casino-button w-full">
-                Start New Game
-              </Button>
-              <Button onClick={onExit} variant="outline" className="casino-button bg-transparent w-full">
-                Exit to Menu
-              </Button>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-400">Win rate</span>
+              <span className="text-white font-semibold">{winRate}%</span>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+          <div className="space-y-2">
+            <Button
+              onClick={initializeGame}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5"
+            >
+              New Session
+            </Button>
+            <Button
+              onClick={onExit}
+              variant="outline"
+              className="w-full border-gray-600 bg-transparent text-gray-300 hover:bg-gray-800 hover:text-white py-2.5"
+            >
+              Back to Menu
+            </Button>
+          </div>
+        </div>
       </div>
     )
   }
 
+  const strategyAccuracy =
+    sessionStats.strategyDecisions > 0
+      ? Math.round((sessionStats.strategyCorrect / sessionStats.strategyDecisions) * 100)
+      : 0
+
   return (
-    <div className="min-h-screen casino-felt p-4">
-      <div className="container mx-auto max-w-6xl">
-        <div className="flex items-center justify-between mb-6">
-          <Button variant="outline" onClick={onExit} className="casino-button bg-transparent">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Exit Game
-          </Button>
-          <div className="text-center">
-            <Badge variant={modeConfig.variant} className="text-lg px-4 py-1 casino-gold">
-              {modeConfig.title}
-            </Badge>
-          </div>
-          {mode !== "testing" && (
-            <div className="money-display rounded-lg p-3 text-right">
-              <div className="text-sm opacity-75">Bankroll</div>
-              <div className="text-xl font-bold flex items-center justify-end">
-                <DollarSign className="h-5 w-5 mr-1" />
-                {gameState.bankroll}
-              </div>
-              {gameState.pendingBets > 0 && (
-                <div className="text-sm text-yellow-300 mt-1">At Risk: ${gameState.pendingBets}</div>
-              )}
-            </div>
+    <div className="table-felt min-h-screen pb-28">
+      {/* Sticky header */}
+      <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-3"
+        style={{ background: "rgba(3,7,18,0.92)", borderBottom: "1px solid rgba(255,255,255,0.05)", backdropFilter: "blur(10px)" }}>
+        <button
+          onClick={onExit}
+          className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          <span className="hidden sm:inline">Menu</span>
+        </button>
+
+        <span
+          className={cn(
+            "text-xs font-semibold px-3 py-1 rounded-full",
+            mode === "real" ? "mode-badge-real" : mode === "practice" ? "mode-badge-practice" : "mode-badge-testing"
           )}
-          {mode === "testing" && <div className="w-24" />}
-        </div>
+        >
+          {modeConfig.title}
+        </span>
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
-            <Card className="dealer-area casino-card">
-              <CardHeader>
-                <CardTitle className="text-white flex items-center justify-between">
-                  <span className="flex items-center">
-                    <Coins className="mr-2 h-5 w-5" />
-                    Dealer
-                  </span>
-                  <span className="text-lg">{gameState.gamePhase === "playing" ? "?" : gameState.dealerScore}</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex gap-2 flex-wrap">
-                  {gameState.dealerHand.map((card, index) => (
-                    <div
-                      key={index}
-                      className={`w-16 h-24 rounded-lg border-2 flex items-center justify-center text-sm font-bold casino-card ${
-                        gameState.gamePhase === "playing" && index === 1
-                          ? "bg-blue-900 border-blue-700 text-blue-300"
-                          : card.suit === "♠" || card.suit === "♣"
-                            ? "text-black"
-                            : "text-red-600"
-                      }`}
-                    >
-                      {gameState.gamePhase === "playing" && index === 1 ? "?" : `${card.rank}${card.suit}`}
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+        {mode !== "testing" ? (
+          <div className="text-right">
+            <div className="text-[10px] text-gray-500 uppercase tracking-widest">Stack</div>
+            <div className="text-base font-bold text-amber-400">${gameState.bankroll}</div>
+          </div>
+        ) : (
+          <div className="text-right">
+            <div className="text-[10px] text-gray-500 uppercase tracking-widest">Accuracy</div>
+            <div className="text-base font-bold text-emerald-400">{strategyAccuracy}%</div>
+          </div>
+        )}
+      </div>
 
-            {gameState.playerHands.map((hand, handIndex) => (
-              <Card
-                key={handIndex}
-                className={`player-area casino-card ${
-                  handIndex === gameState.currentHandIndex && gameState.gamePhase === "playing"
-                    ? "ring-4 ring-yellow-400"
-                    : ""
-                }`}
-              >
-                <CardHeader>
-                  <CardTitle className="text-white flex items-center justify-between">
-                    {gameState.playerHands.length > 1 ? `Hand ${handIndex + 1}` : "Your Hand"}
+      {/* Main content */}
+      <div className="container mx-auto max-w-5xl px-4 pt-5">
+        <div className="lg:grid lg:grid-cols-3 lg:gap-6">
+
+          {/* Center column */}
+          <div className="lg:col-span-2 space-y-4">
+
+            {/* Dealer panel */}
+            <div className="dealer-panel rounded-2xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-semibold uppercase tracking-widest text-red-300/70">Dealer</span>
+                <span className="text-sm font-bold text-white">
+                  {gameState.gamePhase === "playing" ? "?" : gameState.dealerScore}
+                </span>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {gameState.dealerHand.map((card, index) => (
+                  <PlayingCard
+                    key={index}
+                    rank={card.rank}
+                    suit={card.suit}
+                    faceDown={gameState.gamePhase === "playing" && index === 1}
+                    size="md"
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Player hands */}
+            {gameState.playerHands.map((hand, handIndex) => {
+              const isActive = handIndex === gameState.currentHandIndex && gameState.gamePhase === "playing"
+              return (
+                <div
+                  key={handIndex}
+                  className={cn("rounded-2xl p-4 transition-all", isActive ? "player-panel-active" : "player-panel")}
+                >
+                  <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <span className={`text-lg ${hand.value > 21 ? "text-red-400" : ""}`}>
+                      <span className="text-xs font-semibold uppercase tracking-widest text-emerald-300/70">
+                        {gameState.playerHands.length > 1 ? `Hand ${handIndex + 1}` : "You"}
+                      </span>
+                      {isActive && <span className="turn-pill">Your turn</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={cn("text-sm font-bold", hand.value > 21 ? "text-red-400" : "text-white")}>
                         {hand.value}
                         {(hand.isNaturalBlackjack || hand.isBlackjack) && (
-                          <span className="text-yellow-400 ml-1">BJ</span>
+                          <span className="text-amber-400 ml-1 text-xs">BJ</span>
                         )}
                       </span>
                       {mode !== "testing" && (
-                        <div className="flex flex-col items-end">
-                          <Badge
-                            variant={hand.isDoubled ? "destructive" : "outline"}
-                            className={`casino-chip ${hand.isDoubled ? "text-white" : "text-white border-white/20"}`}
-                          >
-                            ${hand.bet}
-                            {hand.isDoubled && " (2x)"}
-                          </Badge>
-                          {hand.isDoubled && hand.originalBet && (
-                            <span className="text-xs text-green-200 mt-1">Doubled from ${hand.originalBet}</span>
-                          )}
-                        </div>
+                        <span className="bet-chip">
+                          ${hand.bet}{hand.isDoubled ? " ×2" : ""}
+                        </span>
                       )}
                     </div>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
+                  </div>
                   <div className="flex gap-2 flex-wrap">
                     {hand.cards.map((card, idx) => (
-                      <div
-                        key={idx}
-                        className={`w-16 h-24 rounded-lg border-2 flex items-center justify-center text-sm font-bold casino-card ${
-                          card.suit === "♠" || card.suit === "♣" ? "text-black" : "text-red-600"
-                        }`}
-                      >
-                        {card.rank}
-                        {card.suit}
-                      </div>
+                      <PlayingCard key={idx} rank={card.rank} suit={card.suit} size="md" />
                     ))}
                   </div>
-                </CardContent>
-              </Card>
-            ))}
+                </div>
+              )
+            })}
 
+            {/* Training feedback */}
             {mode === "testing" && actionFeedback.show && (
-              <Card
-                className={`casino-card border-4 ${actionFeedback.isCorrect ? "border-green-400" : "border-red-400"}`}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    {actionFeedback.isCorrect ? (
-                      <CheckCircle className="h-5 w-5 text-green-400" />
-                    ) : (
-                      <XCircle className="h-5 w-5 text-red-400" />
-                    )}
-                    <span className={`font-bold ${actionFeedback.isCorrect ? "text-green-400" : "text-red-400"}`}>
-                      {actionFeedback.isCorrect ? "Correct!" : "Incorrect"}
-                    </span>
-                  </div>
-                  <div className="text-white text-sm">
-                    <p>
-                      You chose: <strong>{actionFeedback.playerAction}</strong>
-                    </p>
-                    {!actionFeedback.isCorrect && (
-                      <p>
-                        Recommended: <strong>{actionFeedback.recommendedAction}</strong>
-                      </p>
-                    )}
-                    <p className="mt-1 text-green-200">{actionFeedback.reason}</p>
-                  </div>
-                </CardContent>
-              </Card>
+              <div className={cn("rounded-2xl p-4", actionFeedback.isCorrect ? "feedback-correct" : "feedback-incorrect")}>
+                <div className="flex items-center gap-2 mb-1">
+                  {actionFeedback.isCorrect ? (
+                    <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-red-400 shrink-0" />
+                  )}
+                  <span className={cn("text-sm font-bold", actionFeedback.isCorrect ? "text-emerald-300" : "text-red-300")}>
+                    {actionFeedback.isCorrect ? "Correct" : "Incorrect"}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-300 space-y-0.5 pl-6">
+                  <div>You played: <span className="font-semibold text-white">{actionFeedback.playerAction}</span></div>
+                  {!actionFeedback.isCorrect && (
+                    <div>Correct play: <span className="font-semibold text-white">{actionFeedback.recommendedAction}</span></div>
+                  )}
+                  <div className="text-gray-400 mt-1">{actionFeedback.reason}</div>
+                </div>
+              </div>
             )}
 
-            <Card className="casino-card bg-gradient-to-br from-gray-800 to-gray-900">
-              <CardContent className="p-6">
-                <div className="text-center mb-4">
-                  <p className="text-white text-lg font-semibold">{gameState.message}</p>
-                  {mode !== "testing" && gameState.mainBet > 0 && (
-                    <div className="text-green-200 space-y-1 mt-2">
-                      <div className="flex justify-center gap-4">
-                        <div className="money-display rounded px-3 py-1">
-                          <span className="text-sm">Main Bet: </span>
-                          <span className="font-bold">${gameState.mainBet}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+            {/* Practice hint — mobile only */}
+            {modeConfig.showHints && strategyRecommendation && gameState.gamePhase === "playing" && (
+              <div className="lg:hidden hint-panel rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Info className="h-4 w-4 text-blue-400 shrink-0" />
+                  <span className="text-xs font-semibold text-blue-300 uppercase tracking-widest">Strategy Hint</span>
                 </div>
+                <div className="pl-6 text-sm">
+                  <span className="font-bold text-white">{strategyRecommendation.action}</span>
+                  <span className="text-gray-400 ml-2 text-xs">{strategyRecommendation.reason}</span>
+                </div>
+              </div>
+            )}
 
-                {gameState.gamePhase === "betting" && (
-                  <div className="space-y-4">
-                    <div className="flex gap-2 justify-center flex-wrap">
-                      {[10, 25, 50, 100].map((amount) => (
-                        <Button
-                          key={amount}
-                          onClick={() => placeBet(amount)}
-                          disabled={amount > getAvailableMoney()}
-                          className="casino-button"
-                        >
-                          Bet ${amount}
-                        </Button>
-                      ))}
-                    </div>
-                    <div className="flex gap-2 justify-center items-center">
-                      <Input
-                        type="number"
-                        placeholder="Custom amount"
-                        value={customBetAmount}
-                        onChange={(e) => setCustomBetAmount(e.target.value)}
-                        className="w-32 bg-gray-800 border-yellow-600 text-white placeholder:text-white/50"
-                        min="1"
-                        max={getAvailableMoney()}
-                      />
-                      <Button
-                        onClick={() => {
-                          const amount = Number.parseInt(customBetAmount)
-                          if (amount > 0 && amount <= getAvailableMoney()) {
-                            placeBet(amount)
-                          }
-                        }}
-                        disabled={
-                          !customBetAmount ||
-                          Number.parseInt(customBetAmount) <= 0 ||
-                          Number.parseInt(customBetAmount) > getAvailableMoney()
-                        }
-                        className="casino-button bg-green-700 hover:bg-green-600"
-                      >
-                        Bet
-                      </Button>
-                    </div>
-                  </div>
-                )}
+            {/* Status message */}
+            {gameState.message && (
+              <div className="text-center py-1">
+                <p className="text-sm font-semibold text-gray-200">{gameState.message}</p>
+              </div>
+            )}
 
-                {gameState.gamePhase === "playing" && currentHand && !currentHand.isComplete && (
-                  <div className="flex gap-2 justify-center flex-wrap">
-                    <Button onClick={hit} className="casino-button bg-red-700 hover:bg-red-600">
-                      Hit
-                    </Button>
-                    <Button onClick={stand} className="casino-button bg-yellow-700 hover:bg-yellow-600">
-                      Stand
-                    </Button>
-                    {currentHand.canDouble && getAvailableMoney() >= currentHand.bet && (
-                      <Button onClick={doubleDown} className="casino-button bg-purple-700 hover:bg-purple-600">
-                        Double
-                      </Button>
-                    )}
-                    {currentHand.canSplit && getAvailableMoney() >= currentHand.bet && (
-                      <Button onClick={split} className="casino-button bg-orange-700 hover:bg-orange-600">
-                        Split
-                      </Button>
-                    )}
-                  </div>
-                )}
-
-                {gameState.gamePhase === "finished" && (
-                  <div className="text-center">
-                    <Button onClick={initializeGame} className="casino-button bg-green-700 hover:bg-green-600">
-                      <RotateCcw className="mr-2 h-4 w-4" />
-                      New Hand
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            {/* Mobile compact stats */}
+            <div className="lg:hidden grid grid-cols-4 gap-2 text-center">
+              {[
+                { label: "Played", value: sessionStats.handsPlayed },
+                { label: "Won", value: sessionStats.handsWon },
+                { label: "Lost", value: sessionStats.handsLost },
+                { label: "Win %", value: `${winRate}%` },
+              ].map(({ label, value }) => (
+                <div key={label} className="stat-panel rounded-xl py-2 px-1">
+                  <div className="text-[10px] text-gray-500 uppercase tracking-wider">{label}</div>
+                  <div className="text-sm font-bold text-white">{value}</div>
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div className="space-y-6">
+          {/* Desktop sidebar */}
+          <div className="hidden lg:flex flex-col gap-4 pt-0">
+
+            {/* Practice hint */}
             {modeConfig.showHints && strategyRecommendation && gameState.gamePhase === "playing" && (
-              <Card className="casino-card bg-blue-900/30 border-blue-400">
-                <CardHeader>
-                  <CardTitle className="text-blue-200 flex items-center">
-                    <Info className="mr-2 h-4 w-4" />
-                    Strategy Hint
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Alert className="bg-blue-800/30 border-blue-400/50">
-                    <AlertDescription className="text-blue-100">
-                      <strong>Recommended: {strategyRecommendation.action}</strong>
-                      <br />
-                      <span className="text-sm">{strategyRecommendation.reason}</span>
-                    </AlertDescription>
-                  </Alert>
-                </CardContent>
-              </Card>
+              <div className="hint-panel rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Info className="h-4 w-4 text-blue-400" />
+                  <span className="text-xs font-semibold text-blue-300 uppercase tracking-widest">Strategy Hint</span>
+                </div>
+                <div className="text-sm font-bold text-white">{strategyRecommendation.action}</div>
+                <div className="text-xs text-gray-400 mt-1">{strategyRecommendation.reason}</div>
+              </div>
             )}
 
+            {/* Training scoreboard */}
             {mode === "testing" && (
-              <Card className="casino-card bg-green-900/30 border-green-400">
-                <CardHeader>
-                  <CardTitle className="text-green-200 flex items-center">
-                    <Target className="mr-2 h-4 w-4" />
-                    Testing Scoreboard
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex justify-between text-white">
-                    <span>Decisions:</span>
-                    <span>{sessionStats.strategyDecisions}</span>
-                  </div>
-                  <div className="flex justify-between text-white">
-                    <span>Correct:</span>
-                    <span>{sessionStats.strategyCorrect}</span>
-                  </div>
-                  <div className="flex justify-between text-white">
-                    <span>Accuracy:</span>
-                    <span>
-                      {sessionStats.strategyDecisions > 0
-                        ? `${Math.round((sessionStats.strategyCorrect / sessionStats.strategyDecisions) * 100)}%`
-                        : "0%"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-white">
-                    <span>Streak:</span>
-                    <span>{sessionStats.strategyStreak}</span>
-                  </div>
-                </CardContent>
-              </Card>
+              <div className="stat-panel rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Target className="h-4 w-4 text-emerald-400" />
+                  <span className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Training</span>
+                </div>
+                <div className="space-y-2">
+                  {[
+                    { label: "Decisions", value: sessionStats.strategyDecisions },
+                    { label: "Correct", value: sessionStats.strategyCorrect },
+                    { label: "Accuracy", value: `${strategyAccuracy}%` },
+                    { label: "Streak", value: sessionStats.strategyStreak },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="flex justify-between text-sm">
+                      <span className="text-gray-400">{label}</span>
+                      <span className="text-white font-semibold">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
 
-            <Card className="money-display casino-card">
-              <CardHeader>
-                <CardTitle className="text-yellow-300">Session Stats</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex justify-between text-white">
-                  <span>Hands Played:</span>
-                  <span>{sessionStats.handsPlayed}</span>
-                </div>
-                <div className="flex justify-between text-white">
-                  <span>Hands Won:</span>
-                  <span>{sessionStats.handsWon}</span>
-                </div>
-                <div className="flex justify-between text-white">
-                  <span>Hands Lost:</span>
-                  <span>{sessionStats.handsLost}</span>
-                </div>
-                <div className="flex justify-between text-white">
-                  <span>Pushes:</span>
-                  <span>{sessionStats.handsPushed}</span>
-                </div>
-                <div className="flex justify-between text-white">
-                  <span>Win Rate:</span>
-                  <span>{winRate}%</span>
-                </div>
-              </CardContent>
-            </Card>
+            {/* Session stats */}
+            <div className="stat-panel rounded-2xl p-4">
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Session</div>
+              <div className="space-y-2">
+                {[
+                  { label: "Hands", value: sessionStats.handsPlayed },
+                  { label: "Won", value: sessionStats.handsWon },
+                  { label: "Lost", value: sessionStats.handsLost },
+                  { label: "Push", value: sessionStats.handsPushed },
+                  { label: "Win rate", value: `${winRate}%` },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex justify-between text-sm">
+                    <span className="text-gray-400">{label}</span>
+                    <span className="text-white font-semibold">{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-            <Card className="casino-card bg-gray-800/50">
-              <CardHeader>
-                <CardTitle className="text-white">Quick Rules</CardTitle>
-              </CardHeader>
-              <CardContent className="text-green-200 text-sm space-y-1">
-                <p>• Get as close to 21 as possible</p>
-                <p>• Dealer stands on soft 17 (S17)</p>
-                <p>• Blackjack pays 3:2 on initial natural only</p>
-                <p>• Split same ranks only</p>
-                <p>• Double after split allowed</p>
-                <p>• No insurance or side bets</p>
-              </CardContent>
-            </Card>
+            {/* Active bet */}
+            {mode !== "testing" && gameState.mainBet > 0 && (
+              <div className="stat-panel rounded-2xl p-4">
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Active bet</div>
+                <div className="text-2xl font-bold text-amber-400">${gameState.mainBet}</div>
+              </div>
+            )}
+
+            {/* Table rules */}
+            <div className="stat-panel rounded-2xl p-4">
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Rules</div>
+              <ul className="space-y-1.5 text-xs text-gray-400">
+                <li>6 decks · S17</li>
+                <li>Blackjack pays 3:2</li>
+                <li>Double after split</li>
+                <li>No insurance</li>
+              </ul>
+            </div>
           </div>
         </div>
+      </div>
+
+      {/* Sticky action dock */}
+      <div className="action-dock fixed bottom-0 left-0 right-0 px-4 py-3 safe-area-inset-bottom">
+
+        {/* Betting phase */}
+        {gameState.gamePhase === "betting" && (
+          <div className="max-w-lg mx-auto space-y-2">
+            <div className="flex gap-2 justify-center">
+              {[10, 25, 50, 100].map((amount) => (
+                <button
+                  key={amount}
+                  onClick={() => placeBet(amount)}
+                  disabled={amount > getAvailableMoney()}
+                  className={cn(
+                    "flex-1 h-12 rounded-xl text-sm font-bold transition-all",
+                    amount > getAvailableMoney()
+                      ? "bg-gray-800 text-gray-600 cursor-not-allowed"
+                      : "bg-gray-700 hover:bg-gray-600 text-white active:scale-95"
+                  )}
+                >
+                  ${amount}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                type="number"
+                placeholder="Custom"
+                value={customBetAmount}
+                onChange={(e) => setCustomBetAmount(e.target.value)}
+                className="flex-1 h-11 bg-gray-800 border-gray-600 text-white placeholder:text-gray-500 text-sm"
+                min="1"
+                max={getAvailableMoney()}
+              />
+              <Button
+                onClick={() => {
+                  const amount = Number.parseInt(customBetAmount)
+                  if (amount > 0 && amount <= getAvailableMoney()) placeBet(amount)
+                }}
+                disabled={
+                  !customBetAmount ||
+                  Number.parseInt(customBetAmount) <= 0 ||
+                  Number.parseInt(customBetAmount) > getAvailableMoney()
+                }
+                className="h-11 px-5 bg-amber-600 hover:bg-amber-500 text-white font-semibold disabled:opacity-40"
+              >
+                Bet
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Playing phase */}
+        {gameState.gamePhase === "playing" && currentHand && !currentHand.isComplete && (
+          <div className="max-w-lg mx-auto flex gap-2">
+            <button
+              onClick={hit}
+              className="flex-1 h-14 rounded-xl bg-red-700 hover:bg-red-600 active:bg-red-800 text-white font-bold text-sm transition-all active:scale-95"
+            >
+              Hit
+            </button>
+            <button
+              onClick={stand}
+              className="flex-1 h-14 rounded-xl bg-amber-700 hover:bg-amber-600 active:bg-amber-800 text-white font-bold text-sm transition-all active:scale-95"
+            >
+              Stand
+            </button>
+            {currentHand.canDouble && getAvailableMoney() >= currentHand.bet && (
+              <button
+                onClick={doubleDown}
+                className="flex-1 h-14 rounded-xl bg-violet-700 hover:bg-violet-600 active:bg-violet-800 text-white font-bold text-sm transition-all active:scale-95"
+              >
+                Double
+              </button>
+            )}
+            {currentHand.canSplit && getAvailableMoney() >= currentHand.bet && (
+              <button
+                onClick={split}
+                className="flex-1 h-14 rounded-xl bg-blue-700 hover:bg-blue-600 active:bg-blue-800 text-white font-bold text-sm transition-all active:scale-95"
+              >
+                Split
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Playing phase — hand complete, waiting */}
+        {gameState.gamePhase === "playing" && currentHand && currentHand.isComplete && (
+          <div className="max-w-lg mx-auto text-center text-sm text-gray-400 py-3">
+            Resolving hand…
+          </div>
+        )}
+
+        {/* Finished phase */}
+        {gameState.gamePhase === "finished" && (
+          <div className="max-w-lg mx-auto">
+            <button
+              onClick={initializeGame}
+              className="w-full h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2"
+            >
+              <RotateCcw className="h-4 w-4" />
+              New Hand
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useLiveRoom } from "@/hooks/useLiveRoom"
+import GameBoard from "@/components/game-board"
 import type { RoomPlayer, RoomHandResult } from "@/lib/types/room"
 
 // ---------------------------------------------------------------------------
@@ -167,6 +168,7 @@ export default function LiveRoomPage({ params }: { params: Promise<{ roomId: str
   const router = useRouter()
   const {
     room,
+    playerId,
     isLoading,
     error,
     setReady,
@@ -196,8 +198,6 @@ export default function LiveRoomPage({ params }: { params: Promise<{ roomId: str
     )
   }
 
-  const isHost = (playerId: string) => room.hostId === playerId
-  const firstPlayer = room.players[0] // treat first player as "current user" for single-device MVP
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-950 via-purple-900 to-violet-900 flex flex-col">
@@ -402,99 +402,80 @@ export default function LiveRoomPage({ params }: { params: Promise<{ roomId: str
         {/* PLAYER TURN                                                          */}
         {/* ------------------------------------------------------------------ */}
         {room.state === "player_turn" && (
-          <Card className="bg-violet-900/50 border-violet-700">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-white text-base">Player Turns</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {room.players.map((player) => {
-                const isCurrentTurn = room.currentPlayerId === player.id
-                return (
-                  <div
-                    key={player.id}
-                    className={`p-3 rounded-lg border transition-colors ${
-                      isCurrentTurn
-                        ? "bg-yellow-900/30 border-yellow-600"
-                        : "bg-violet-950/40 border-violet-700"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Circle
-                          className={`w-2.5 h-2.5 flex-shrink-0 ${
-                            isCurrentTurn ? "fill-yellow-400 text-yellow-400" : "text-violet-600"
-                          }`}
-                        />
-                        <span className="text-white font-medium truncate">{player.name}</span>
-                        {isCurrentTurn && (
-                          <Badge className="bg-yellow-700 text-yellow-100 text-xs flex-shrink-0">
-                            Your Turn
-                          </Badge>
-                        )}
-                      </div>
-                      {isCurrentTurn && (
-                        <div className="flex gap-1.5 flex-shrink-0">
-                          {/* Placeholder action buttons — visual only for MVP */}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border-green-600 text-green-300 hover:bg-green-900/30 text-xs h-7"
-                            disabled
-                            title="Full game integration pending"
-                          >
-                            Hit
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border-red-600 text-red-300 hover:bg-red-900/30 text-xs h-7"
-                            disabled
-                            title="Full game integration pending"
-                          >
-                            Stand
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="bg-violet-600 hover:bg-violet-500 text-white text-xs h-7"
-                            onClick={() => completePlayerTurn(player.id)}
-                            disabled={isLoading}
-                          >
-                            Done
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-
-              {/* After current player completes turn: advance to next or dealer */}
-              <div className="pt-1 space-y-2">
-                <p className="text-violet-400 text-xs text-center">
-                  Advance turn to another player or start dealer turn
-                </p>
-                {room.players.map((player) => (
-                  <Button
-                    key={player.id}
-                    size="sm"
-                    variant="outline"
-                    className="w-full border-violet-600 text-violet-200 hover:bg-violet-700 text-xs"
-                    onClick={() => nextPlayerTurn(player.id)}
-                    disabled={isLoading || room.currentPlayerId === player.id}
-                  >
-                    {player.name}&apos;s Turn
-                  </Button>
-                ))}
-                <Button
-                  className="w-full bg-amber-700 hover:bg-amber-600 text-white"
-                  onClick={() => startDealerTurn()}
-                  disabled={isLoading}
-                >
-                  Dealer&apos;s Turn
-                </Button>
+          <>
+            {/* If it's this device's player's turn, show the full game board */}
+            {room.currentPlayerId === playerId ? (
+              <div className="flex-1">
+                <GameBoard
+                  mode="practice"
+                  onExit={() => completePlayerTurn(playerId)}
+                  onHandComplete={() => completePlayerTurn(playerId)}
+                  initialBankroll={room.players.find((p) => p.id === playerId)?.sessionChips ?? 1000}
+                />
               </div>
-            </CardContent>
-          </Card>
+            ) : (
+              <Card className="bg-violet-900/50 border-violet-700">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-white text-base">Player Turns</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {room.players.map((player) => {
+                    const isCurrentTurn = room.currentPlayerId === player.id
+                    return (
+                      <div
+                        key={player.id}
+                        className={`p-3 rounded-lg border transition-colors ${
+                          isCurrentTurn
+                            ? "bg-yellow-900/30 border-yellow-600"
+                            : "bg-violet-950/40 border-violet-700"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Circle
+                            className={`w-2.5 h-2.5 flex-shrink-0 ${
+                              isCurrentTurn ? "fill-yellow-400 text-yellow-400" : "text-violet-600"
+                            }`}
+                          />
+                          <span className="text-white font-medium truncate">{player.name}</span>
+                          {isCurrentTurn && (
+                            <Badge className="bg-yellow-700 text-yellow-100 text-xs flex-shrink-0">
+                              Playing...
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+
+                  {/* Host controls to advance turns manually */}
+                  {room.hostId === playerId && (
+                    <div className="pt-1 space-y-2 border-t border-violet-700">
+                      <p className="text-violet-400 text-xs text-center">Host: advance turn</p>
+                      {room.players.map((player) => (
+                        <Button
+                          key={player.id}
+                          size="sm"
+                          variant="outline"
+                          className="w-full border-violet-600 text-violet-200 hover:bg-violet-700 text-xs"
+                          onClick={() => nextPlayerTurn(player.id)}
+                          disabled={isLoading || room.currentPlayerId === player.id}
+                        >
+                          {player.name}&apos;s Turn
+                        </Button>
+                      ))}
+                      <Button
+                        className="w-full bg-amber-700 hover:bg-amber-600 text-white"
+                        onClick={() => startDealerTurn()}
+                        disabled={isLoading}
+                      >
+                        Dealer&apos;s Turn
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </>
         )}
 
         {/* ------------------------------------------------------------------ */}

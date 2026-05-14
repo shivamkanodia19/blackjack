@@ -154,7 +154,7 @@ export function runDealerTurn(
     remaining = next
   }
 
-  return { cards, remaining }
+  return { cards, shoe: remaining }
 }
 
 // ── Settlement ────────────────────────────────────────────────────────────

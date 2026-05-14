@@ -41,6 +41,7 @@ export default function SoloPage() {
         mode="practice"
         onExit={endSession}
         initialBankroll={config.startingBankroll}
+        showHints={config.showHints}
       />
     )
   }

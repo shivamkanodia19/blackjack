@@ -21,7 +21,7 @@ const DRILL_CATEGORIES: {
 ]
 
 export default function TrainingPage() {
-  const { config, phase, state, startSession, endSession, resetSession, accuracyPct } =
+  const { config, phase, state, startSession, endSession, resetSession, accuracyPct, recordDecision } =
     useTrainingGame()
 
   // Local setup form state
@@ -143,7 +143,17 @@ export default function TrainingPage() {
 
         {/* GameBoard */}
         <div className="flex-1">
-          <GameBoard mode="testing" onExit={endSession} initialBankroll={999999} />
+          <GameBoard
+            mode="testing"
+            onExit={endSession}
+            initialBankroll={999999}
+            onStrategyDecision={(isCorrect, playerAction, recommendedAction, reason) => {
+              recordDecision(
+                { playerAction, recommendedAction, reason, playerTotal: 0, dealerUpCard: 0, isSoft: false, wasPair: false },
+                isCorrect
+              )
+            }}
+          />
         </div>
       </div>
     )
