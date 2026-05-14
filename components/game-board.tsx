@@ -208,6 +208,7 @@ export default function GameBoard({ mode, onExit, initialBankroll = 1000, showHi
   }, [mode])
 
   useEffect(() => {
+    // eslint-disable-next-line
     initializeGame()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

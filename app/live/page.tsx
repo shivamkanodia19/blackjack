@@ -100,7 +100,7 @@ export default function LiveLobbyPage() {
                     Join Room
                   </CardTitle>
                   <CardDescription className="text-violet-300">
-                    Enter a room code to join a friend's game
+                    Enter a room code to join a friend&apos;s game
                   </CardDescription>
                 </CardHeader>
               </Card>

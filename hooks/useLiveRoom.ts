@@ -1,5 +1,5 @@
 "use client"
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { localTransport } from "@/lib/rooms/local-transport"
 import type { Room, RoomConfig, RoomPlayer, RoomHandResult } from "@/lib/types/room"
 
@@ -29,7 +29,7 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
   const [error, setError] = useState<string | null>(null)
 
   // Stable player ID generated once per hook instance
-  const playerIdRef = useRef<string>(crypto.randomUUID())
+  const [playerId] = useState<string>(() => crypto.randomUUID())
 
   // Subscribe to room updates whenever roomId changes
   useEffect(() => {
@@ -69,7 +69,7 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
     async (playerName: string, config?: Partial<RoomConfig>): Promise<Room> => {
       return withState(async () => {
         const hostPlayer: RoomPlayer = {
-          id: playerIdRef.current,
+          id: playerId,
           name: playerName,
           sessionChips: config?.startingChips ?? 1000,
           isReady: false,
@@ -93,7 +93,7 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
     async (code: string, playerName: string): Promise<Room | null> => {
       return withState(async () => {
         const player: RoomPlayer = {
-          id: playerIdRef.current,
+          id: playerId,
           name: playerName,
           sessionChips: 1000, // will be set to room's startingChips by host config
           isReady: false,
@@ -227,7 +227,7 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
 
   return {
     room,
-    playerId: playerIdRef.current,
+    playerId,
     isLoading,
     error,
     createRoom,

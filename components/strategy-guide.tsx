@@ -10,6 +10,61 @@ interface StrategyGuideProps {
   onBack: () => void
 }
 
+const DEALER_HEADERS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "A"]
+
+function getActionColor(action: string) {
+  switch (action) {
+    case "H":
+      return "bg-red-500 text-white hover:bg-red-600"
+    case "S":
+      return "bg-green-500 text-white hover:bg-green-600"
+    case "D":
+      return "bg-blue-500 text-white hover:bg-blue-600"
+    case "R":
+      return "bg-yellow-500 text-black hover:bg-yellow-600"
+    case "Y":
+      return "bg-green-500 text-white hover:bg-green-600"
+    case "N":
+      return "bg-red-500 text-white hover:bg-red-600"
+    default:
+      return "bg-gray-500 text-white hover:bg-gray-600"
+  }
+}
+
+function StrategyChart({ data, title }: { data: { player: string; dealer: string[] }[]; title: string }) {
+  return (
+    <div className="overflow-x-auto">
+      <h3 className="text-xl font-bold text-gray-900 mb-4">{title}</h3>
+      <table className="w-full border-collapse">
+        <thead>
+          <tr>
+            <th className="border border-gray-300 bg-gray-100 text-gray-900 p-3 font-bold">Player</th>
+            {DEALER_HEADERS.map((header) => (
+              <th key={header} className="border border-gray-300 bg-gray-100 text-gray-900 p-3 text-sm font-bold">
+                {header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              <td className="border border-gray-300 bg-gray-50 text-gray-900 p-3 font-bold text-sm">{row.player}</td>
+              {row.dealer.map((action: string, colIndex: number) => (
+                <td key={colIndex} className="border border-gray-300 p-2 text-center">
+                  <div className={`rounded-lg p-2 text-sm font-bold transition-all ${getActionColor(action)}`}>
+                    {action}
+                  </div>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export default function StrategyGuide({ onBack }: StrategyGuideProps) {
   const [selectedCell, setSelectedCell] = useState<string | null>(null)
 
@@ -50,59 +105,6 @@ export default function StrategyGuide({ onBack }: StrategyGuideProps) {
     { player: "3,3", dealer: ["Y", "Y", "Y", "Y", "Y", "Y", "N", "N", "N", "N"] },
     { player: "2,2", dealer: ["Y", "Y", "Y", "Y", "Y", "Y", "N", "N", "N", "N"] },
   ]
-
-  const dealerHeaders = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "A"]
-
-  const getActionColor = (action: string) => {
-    switch (action) {
-      case "H":
-        return "bg-red-500 text-white hover:bg-red-600"
-      case "S":
-        return "bg-green-500 text-white hover:bg-green-600"
-      case "D":
-        return "bg-blue-500 text-white hover:bg-blue-600"
-      case "R":
-        return "bg-yellow-500 text-black hover:bg-yellow-600"
-      case "Y":
-        return "bg-green-500 text-white hover:bg-green-600"
-      case "N":
-        return "bg-red-500 text-white hover:bg-red-600"
-      default:
-        return "bg-gray-500 text-white hover:bg-gray-600"
-    }
-  }
-
-  const StrategyChart = ({ data, title }: { data: any[]; title: string }) => (
-    <div className="overflow-x-auto">
-      <h3 className="text-xl font-bold text-gray-900 mb-4">{title}</h3>
-      <table className="w-full border-collapse">
-        <thead>
-          <tr>
-            <th className="border border-gray-300 bg-gray-100 text-gray-900 p-3 font-bold">Player</th>
-            {dealerHeaders.map((header) => (
-              <th key={header} className="border border-gray-300 bg-gray-100 text-gray-900 p-3 text-sm font-bold">
-                {header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((row, rowIndex) => (
-            <tr key={rowIndex}>
-              <td className="border border-gray-300 bg-gray-50 text-gray-900 p-3 font-bold text-sm">{row.player}</td>
-              {row.dealer.map((action: string, colIndex: number) => (
-                <td key={colIndex} className="border border-gray-300 p-2 text-center">
-                  <div className={`rounded-lg p-2 text-sm font-bold transition-all ${getActionColor(action)}`}>
-                    {action}
-                  </div>
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-700 via-teal-700 to-emerald-800 p-4">
@@ -203,7 +205,7 @@ export default function StrategyGuide({ onBack }: StrategyGuideProps) {
                     <h3 className="text-xl font-bold text-gray-900">Objective</h3>
                     <ul className="space-y-2 text-sm">
                       <li>• Get as close to 21 as possible without going over</li>
-                      <li>• Beat the dealer's hand</li>
+                      <li>• Beat the dealer&apos;s hand</li>
                       <li>• Blackjack (21 with first 2 cards) pays 3:2</li>
                     </ul>
                   </div>
@@ -247,7 +249,7 @@ export default function StrategyGuide({ onBack }: StrategyGuideProps) {
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                   <h4 className="font-semibold text-gray-900 mb-2">Important Note</h4>
                   <p className="text-gray-700 text-sm">
-                    Side bets have higher house edges than the main blackjack game. They're designed for entertainment
+                    Side bets have higher house edges than the main blackjack game. They&apos;re designed for entertainment
                     and should be played responsibly. The house edge on side bets typically ranges from 3% to 25%.
                   </p>
                 </div>
