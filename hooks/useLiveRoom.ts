@@ -1,7 +1,10 @@
 "use client"
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { localTransport } from "@/lib/rooms/local-transport"
+import { SupabaseRoomTransport } from "@/lib/rooms/supabase-transport"
+import { createClient } from "@/lib/supabase/client"
 import type { Room, RoomConfig, RoomPlayer, RoomHandResult } from "@/lib/types/room"
+import type { RoomTransport } from "@/lib/rooms/transport"
 
 export interface UseLiveRoomReturn {
   room: Room | null
@@ -31,16 +34,24 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
   // Stable player ID generated once per hook instance
   const [playerId] = useState<string>(() => crypto.randomUUID())
 
+  // Transport: Supabase when env flag is set, otherwise in-memory local
+  const transport = useMemo<RoomTransport>(() => {
+    if (process.env.NEXT_PUBLIC_USE_SUPABASE_ROOMS === "true") {
+      return new SupabaseRoomTransport(createClient())
+    }
+    return localTransport
+  }, [])
+
   // Subscribe to room updates whenever roomId changes
   useEffect(() => {
     if (!roomId) return
 
-    const unsubscribe = localTransport.subscribeToRoom(roomId, (updatedRoom) => {
+    const unsubscribe = transport.subscribeToRoom(roomId, (updatedRoom) => {
       setRoom(updatedRoom)
     })
 
     return unsubscribe
-  }, [roomId])
+  }, [roomId, transport])
 
   // ---------------------------------------------------------------------------
   // Helper: wrap async actions with loading/error state
@@ -81,12 +92,12 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
           startingChips: config?.startingChips ?? 1000,
           sessionRounds: config?.sessionRounds,
         }
-        const created = await localTransport.createRoom(roomConfig, hostPlayer)
+        const created = await transport.createRoom(roomConfig, hostPlayer)
         setRoom(created)
         return created
       })
     },
-    [withState]
+    [playerId, transport, withState]
   )
 
   const joinRoom = useCallback(
@@ -100,7 +111,7 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
           isConnected: true,
           seatIndex: 0, // will be assigned by room reducer
         }
-        const joined = await localTransport.joinRoomByCode(code.toUpperCase().trim(), player)
+        const joined = await transport.joinRoomByCode(code.toUpperCase().trim(), player)
         if (!joined) {
           setError("Room not found or is no longer accepting players")
           return null
@@ -109,17 +120,17 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
         return joined
       })
     },
-    [withState]
+    [playerId, transport, withState]
   )
 
   const leaveRoom = useCallback(
     async (playerId: string): Promise<void> => {
       if (!roomId) return
       return withState(async () => {
-        await localTransport.sendRoomAction(roomId, { type: "PLAYER_LEAVE", playerId })
+        await transport.sendRoomAction(roomId, { type: "PLAYER_LEAVE", playerId })
       })
     },
-    [roomId, withState]
+    [roomId, transport, withState]
   )
 
   // ---------------------------------------------------------------------------
@@ -129,21 +140,21 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
     async (playerId: string, ready: boolean): Promise<void> => {
       if (!roomId) return
       return withState(async () => {
-        await localTransport.sendRoomAction(
+        await transport.sendRoomAction(
           roomId,
           ready ? { type: "PLAYER_READY", playerId } : { type: "PLAYER_UNREADY", playerId }
         )
       })
     },
-    [roomId, withState]
+    [roomId, transport, withState]
   )
 
   const startBetting = useCallback(async (): Promise<void> => {
     if (!roomId) return
     return withState(async () => {
-      await localTransport.sendRoomAction(roomId, { type: "START_BETTING" })
+      await transport.sendRoomAction(roomId, { type: "START_BETTING" })
     })
-  }, [roomId, withState])
+  }, [roomId, transport, withState])
 
   // ---------------------------------------------------------------------------
   // Betting
@@ -152,18 +163,18 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
     async (playerId: string, amount: number): Promise<void> => {
       if (!roomId) return
       return withState(async () => {
-        await localTransport.sendRoomAction(roomId, { type: "PLACE_BET", playerId, amount })
+        await transport.sendRoomAction(roomId, { type: "PLACE_BET", playerId, amount })
       })
     },
-    [roomId, withState]
+    [roomId, transport, withState]
   )
 
   const startDealing = useCallback(async (): Promise<void> => {
     if (!roomId) return
     return withState(async () => {
-      await localTransport.sendRoomAction(roomId, { type: "START_DEALING" })
+      await transport.sendRoomAction(roomId, { type: "START_DEALING" })
     })
-  }, [roomId, withState])
+  }, [roomId, transport, withState])
 
   // ---------------------------------------------------------------------------
   // Player turns
@@ -172,20 +183,20 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
     async (playerId: string): Promise<void> => {
       if (!roomId) return
       return withState(async () => {
-        await localTransport.sendRoomAction(roomId, { type: "NEXT_PLAYER_TURN", playerId })
+        await transport.sendRoomAction(roomId, { type: "NEXT_PLAYER_TURN", playerId })
       })
     },
-    [roomId, withState]
+    [roomId, transport, withState]
   )
 
   const completePlayerTurn = useCallback(
     async (playerId: string): Promise<void> => {
       if (!roomId) return
       return withState(async () => {
-        await localTransport.sendRoomAction(roomId, { type: "COMPLETE_PLAYER_TURN", playerId })
+        await transport.sendRoomAction(roomId, { type: "COMPLETE_PLAYER_TURN", playerId })
       })
     },
-    [roomId, withState]
+    [roomId, transport, withState]
   )
 
   // ---------------------------------------------------------------------------
@@ -194,9 +205,9 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
   const startDealerTurn = useCallback(async (): Promise<void> => {
     if (!roomId) return
     return withState(async () => {
-      await localTransport.sendRoomAction(roomId, { type: "START_DEALER_TURN" })
+      await transport.sendRoomAction(roomId, { type: "START_DEALER_TURN" })
     })
-  }, [roomId, withState])
+  }, [roomId, transport, withState])
 
   // ---------------------------------------------------------------------------
   // Settlement & round management
@@ -205,25 +216,25 @@ export function useLiveRoom(roomId: string | null): UseLiveRoomReturn {
     async (results: RoomHandResult[]): Promise<void> => {
       if (!roomId) return
       return withState(async () => {
-        await localTransport.sendRoomAction(roomId, { type: "COMPLETE_SETTLEMENT", results })
+        await transport.sendRoomAction(roomId, { type: "COMPLETE_SETTLEMENT", results })
       })
     },
-    [roomId, withState]
+    [roomId, transport, withState]
   )
 
   const nextRound = useCallback(async (): Promise<void> => {
     if (!roomId) return
     return withState(async () => {
-      await localTransport.sendRoomAction(roomId, { type: "NEXT_ROUND" })
+      await transport.sendRoomAction(roomId, { type: "NEXT_ROUND" })
     })
-  }, [roomId, withState])
+  }, [roomId, transport, withState])
 
   const endSession = useCallback(async (): Promise<void> => {
     if (!roomId) return
     return withState(async () => {
-      await localTransport.sendRoomAction(roomId, { type: "END_SESSION" })
+      await transport.sendRoomAction(roomId, { type: "END_SESSION" })
     })
-  }, [roomId, withState])
+  }, [roomId, transport, withState])
 
   return {
     room,
