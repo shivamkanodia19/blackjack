@@ -189,3 +189,91 @@
 .bg-card-dark {
   background: rgba(30, 41, 59, 0.95);
 }
+
+/* ── Premium table redesign ─────────────────────────────── */
+
+.table-felt {
+  background: radial-gradient(ellipse at 50% 30%, #1a4731 0%, #0f2d20 45%, #0a1f17 100%);
+  min-height: 100vh;
+}
+
+.dealer-panel {
+  background: rgba(127, 29, 29, 0.25);
+  border: 1px solid rgba(185, 28, 28, 0.25);
+}
+
+.player-panel {
+  background: rgba(20, 83, 45, 0.25);
+  border: 1px solid rgba(22, 101, 52, 0.3);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.player-panel-active {
+  background: rgba(20, 83, 45, 0.45);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+.stat-panel {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(71, 85, 105, 0.35);
+}
+
+.hint-panel {
+  background: rgba(23, 37, 84, 0.55);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.feedback-correct {
+  background: rgba(5, 46, 22, 0.55);
+  border: 2px solid rgba(52, 211, 153, 0.45);
+}
+
+.feedback-incorrect {
+  background: rgba(69, 10, 10, 0.55);
+  border: 2px solid rgba(248, 113, 113, 0.45);
+}
+
+.action-dock {
+  background: rgba(3, 7, 18, 0.96);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.mode-badge-real {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.mode-badge-practice {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.mode-badge-testing {
+  background: rgba(52, 211, 153, 0.15);
+  color: #6ee7b7;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.bet-chip {
+  background: radial-gradient(circle at 35% 35%, #b91c1c, #7f1d1d);
+  border: 2px solid rgba(251, 191, 36, 0.6);
+  color: #fbbf24;
+  font-weight: 700;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 9999px;
+}
+
+.turn-pill {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 9999px;
+}

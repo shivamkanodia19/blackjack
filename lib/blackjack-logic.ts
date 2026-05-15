@@ -1,4 +1,5 @@
 import type { Card, StrategyRecommendation } from "./types"
+import { scoreHand } from "./blackjack/engine"
 
 // Build N standard decks
 export function createDeck(numDecks = 6): Card[] {
@@ -35,42 +36,14 @@ export function dealCard(deck: Card[]): Card {
   return card
 }
 
-// Returns best total (Aces as 11, reduce to 1 as needed)
+// Returns best total — delegates to the canonical engine implementation
 export function calculateHandValue(hand: Card[]): number {
-  let total = 0
-  let aces = 0
-  for (const c of hand) {
-    if (c.rank === "A") {
-      total += 1 // Start with ace as 1
-      aces++
-    } else {
-      total += c.value
-    }
-  }
-  while (aces > 0 && total + 10 <= 21) {
-    total += 10 // Upgrade one ace from 1 to 11
-    aces--
-  }
-  return total
+  return scoreHand(hand).total
 }
 
-// Softness: true if at least one Ace is still counted as 11 after adjustment
+// Softness: true if at least one Ace is still counted as 11
 export function isSoftHand(hand: Card[]): boolean {
-  let total = 0
-  let aces = 0
-  for (const c of hand) {
-    if (c.rank === "A") {
-      total += 11
-      aces++
-    } else {
-      total += c.value
-    }
-  }
-  while (total > 21 && aces > 0) {
-    total -= 10
-    aces--
-  }
-  return aces > 0
+  return scoreHand(hand).soft
 }
 
 function normalizeUpcard(v: number): number {

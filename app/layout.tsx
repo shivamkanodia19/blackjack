@@ -3,9 +3,9 @@ import type { Metadata } from "next"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "v0 App",
-  description: "Created with v0",
-  generator: "v0.dev",
+  title: "Felt — Play Cards Sharper",
+  description: "Play-money poker and blackjack. AI opponents, strategy coaching, private tables with friends. No real money involved.",
+  generator: "Felt",
 }
 
 export default function RootLayout({
